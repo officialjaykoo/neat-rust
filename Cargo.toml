@@ -1,0 +1,17 @@
+[package]
+name = "neat-rust"
+version = "0.1.0"
+edition = "2021"
+description = "Rust port of the local neat-python core used by k-flower_card."
+license = "MIT"
+
+[lib]
+name = "neat_rust"
+path = "src/lib.rs"
+
+[[bin]]
+name = "neat-rust-inspect"
+path = "src/main.rs"
+
+[dependencies]
+json = "0.12"

@@ -1,0 +1,81 @@
+use std::path::PathBuf;
+
+use neat_rust::{
+    CompatibilityExcessCoefficient, Config, FitnessSharingMode, InitialConnection, SpawnMethod,
+    TargetNumSpecies,
+};
+
+fn repo_path(relative: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join(relative)
+}
+
+#[test]
+fn parses_recurrent_memory8_config() {
+    let path = repo_path("scripts/configs/neat_recurrent_memory8.ini");
+    let config = Config::from_file(path).expect("memory8 recurrent config should parse");
+
+    assert_eq!(config.neat.pop_size, 72);
+    assert_eq!(config.genome.num_inputs, 8);
+    assert_eq!(config.genome.num_outputs, 2);
+    assert!(!config.genome.feed_forward);
+    assert_eq!(
+        config.genome.initial_connection,
+        InitialConnection::full_direct()
+    );
+    assert_eq!(config.input_keys(), vec![-1, -2, -3, -4, -5, -6, -7, -8]);
+    assert_eq!(config.output_keys(), vec![0, 1]);
+    assert!(config
+        .genome
+        .activation
+        .options
+        .iter()
+        .any(|x| x == "identity"));
+    assert_eq!(config.genome.memory_gate_enabled.default, false);
+    assert_eq!(config.genome.memory_gate_enabled.mutate_rate, 0.02);
+    assert_eq!(config.neat.seed, None);
+    assert_eq!(
+        config.genome.compatibility_excess_coefficient,
+        CompatibilityExcessCoefficient::Auto
+    );
+    assert!(config.genome.compatibility_include_node_genes);
+    assert_eq!(config.genome.compatibility_enable_penalty, 1.0);
+    assert_eq!(
+        config.species_set.target_num_species,
+        TargetNumSpecies::Disabled
+    );
+    assert_eq!(config.species_set.threshold_adjust_rate, 0.1);
+    assert_eq!(config.species_set.threshold_min, 0.1);
+    assert_eq!(config.species_set.threshold_max, 100.0);
+    assert_eq!(
+        config.reproduction.fitness_sharing,
+        FitnessSharingMode::Normalized
+    );
+    assert_eq!(config.reproduction.spawn_method, SpawnMethod::Smoothed);
+    assert_eq!(config.reproduction.interspecies_crossover_prob, 0.0);
+    assert_eq!(config.reproduction.elitism, 2);
+}
+
+#[test]
+fn parses_recurrent_hand7_config() {
+    let path = repo_path("scripts/configs/neat_recurrent_hand7.ini");
+    let config = Config::from_file(path).expect("hand7 recurrent config should parse");
+
+    assert_eq!(config.genome.num_inputs, 7);
+    assert_eq!(config.genome.num_outputs, 2);
+    assert!(!config.genome.feed_forward);
+    assert_eq!(config.input_keys(), vec![-1, -2, -3, -4, -5, -6, -7]);
+}
+
+#[test]
+fn parses_feedforward_memory8_config_without_memory_gate_keys() {
+    let path = repo_path("scripts/configs/neat_feedforward_memory8.ini");
+    let config = Config::from_file(path).expect("memory8 feed-forward config should parse");
+
+    assert_eq!(config.genome.num_inputs, 8);
+    assert_eq!(config.genome.num_outputs, 2);
+    assert!(config.genome.feed_forward);
+    assert_eq!(config.genome.memory_gate_enabled.default, false);
+    assert_eq!(config.genome.memory_gate_enabled.mutate_rate, 0.0);
+}
