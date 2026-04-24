@@ -9,7 +9,9 @@ use neat_rust::{
 };
 
 fn repo_path(relative: &str) -> PathBuf {
-    let relative = relative.strip_prefix("scripts/configs/").unwrap_or(relative);
+    let relative = relative
+        .strip_prefix("scripts/configs/")
+        .unwrap_or(relative);
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("fixtures")
@@ -80,7 +82,7 @@ fn native_cuda_backend_is_detected_when_nvidia_driver_is_present() {
 }
 
 #[test]
-fn gpu_ctrnn_packing_matches_neat_python_layout() {
+fn gpu_ctrnn_packing_matches_canonical_layout() {
     let config = memory8_config();
     let mut genomes = BTreeMap::new();
     genomes.insert(GenomeId::new(1), simple_ctrnn_genome(1));

@@ -29,7 +29,9 @@ impl RandomSource for SequenceRng {
 }
 
 fn repo_path(relative: &str) -> PathBuf {
-    let relative = relative.strip_prefix("scripts/configs/").unwrap_or(relative);
+    let relative = relative
+        .strip_prefix("scripts/configs/")
+        .unwrap_or(relative);
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("fixtures")
@@ -162,7 +164,7 @@ fn crossover_honors_min_fitness_direction_for_excess_genes() {
 }
 
 #[test]
-fn distance_uses_neat_python_21_innovation_excess_and_enable_penalty() {
+fn distance_uses_innovation_excess_and_enable_penalty() {
     let mut config = Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.ini"))
         .expect("config should parse");
     config.genome.compatibility_disjoint_coefficient = 1.0;

@@ -1,4 +1,4 @@
-//! neat-python compatible config/export/checkpoint boundary.
+//! NEAT INI config, genome export, and checkpoint boundary.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -11,7 +11,7 @@ pub use crate::config::{
     NeatConfig, ReproductionConfig, SpawnMethod, SpeciesFitnessFunction, SpeciesSetConfig,
     StagnationConfig, StringAttributeConfig, StructuralMutationSurer, TargetNumSpecies,
 };
-pub use crate::export_json::{export_genome_json, GenomeJsonOptions, NEAT_PYTHON_GENOME_FORMAT};
+pub use crate::export_json::{export_genome_json, GenomeJsonOptions, NEAT_GENOME_FORMAT};
 
 use crate::evolution::{PopulationCheckpointError, PopulationCheckpointSink};
 use crate::genome::DefaultGenome;
@@ -58,11 +58,11 @@ impl PopulationCheckpointSink for RustCheckpointSink {
     }
 }
 
-pub fn load_neat_python_config(path: impl AsRef<Path>) -> Result<Config, ConfigError> {
+pub fn load_neat_config(path: impl AsRef<Path>) -> Result<Config, ConfigError> {
     Config::from_file(path)
 }
 
-pub fn export_neat_python_genome_json(
+pub fn export_neat_genome_json(
     genome: &DefaultGenome,
     config: &Config,
     feature_profile: impl AsRef<str>,

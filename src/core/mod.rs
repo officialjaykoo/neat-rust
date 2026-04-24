@@ -1,7 +1,7 @@
 //! Rust-native NEAT core surface.
 //!
 //! This facade keeps the evolutionary/network internals grouped separately from
-//! neat-python compatibility and k-flower runtime glue.
+//! compatibility adapters and application-specific crates.
 
 pub mod math {
     pub use crate::activation::{

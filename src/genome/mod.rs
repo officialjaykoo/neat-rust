@@ -1,13 +1,15 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::error::Error;
-use std::fmt;
 
 use crate::attributes::RandomSource;
 use crate::config::{FitnessCriterion, GenomeConfig, InitialConnectionMode};
-use crate::gene::{ConnectionKey, DefaultConnectionGene, DefaultNodeGene, GeneError, NodeKey};
+use crate::gene::{ConnectionKey, DefaultConnectionGene, DefaultNodeGene, NodeKey};
 use crate::graph::{creates_cycle, required_for_output};
 use crate::ids::GenomeId;
 use crate::innovation::{InnovationTracker, MutationType};
+
+mod error;
+
+pub use error::GenomeError;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DefaultGenome {
@@ -15,15 +17,6 @@ pub struct DefaultGenome {
     pub connections: BTreeMap<ConnectionKey, DefaultConnectionGene>,
     pub nodes: BTreeMap<NodeKey, DefaultNodeGene>,
     pub fitness: Option<f64>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum GenomeError {
-    Gene(GeneError),
-    EmptyChoice(&'static str),
-    InvalidConnection(ConnectionKey),
-    MissingFitness(GenomeId),
-    UnsupportedInitialConnection(String),
 }
 
 impl DefaultGenome {
@@ -996,28 +989,6 @@ fn compatibility_excess_coefficient(config: &GenomeConfig) -> f64 {
     config
         .compatibility_excess_coefficient
         .resolve(config.compatibility_disjoint_coefficient)
-}
-
-impl fmt::Display for GenomeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Gene(err) => write!(f, "{err}"),
-            Self::EmptyChoice(name) => write!(f, "cannot choose from empty {name}"),
-            Self::InvalidConnection(key) => write!(f, "invalid connection {key}"),
-            Self::MissingFitness(key) => write!(f, "missing fitness for genome {key}"),
-            Self::UnsupportedInitialConnection(value) => {
-                write!(f, "unsupported initial_connection {value:?}")
-            }
-        }
-    }
-}
-
-impl Error for GenomeError {}
-
-impl From<GeneError> for GenomeError {
-    fn from(value: GeneError) -> Self {
-        Self::Gene(value)
-    }
 }
 
 pub fn input_keys(config: &GenomeConfig) -> Vec<NodeKey> {

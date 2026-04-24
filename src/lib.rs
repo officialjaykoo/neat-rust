@@ -1,7 +1,7 @@
 //! `neat-rust` exposes three public layers:
 //! - `core`: Rust-native NEAT building blocks
-//! - `compat`: neat-python / JS compatibility adapters
-//! - `runtime`: application-facing runners built on top of the first two
+//! - `compat`: config/model export and JS boundary adapters
+//! - `policy_bridge`: generic compiled-policy inference helpers
 
 pub mod activation;
 pub mod aggregation;
@@ -12,6 +12,7 @@ pub mod config;
 pub mod core;
 pub mod eval_bridge;
 mod evolution;
+pub mod export;
 pub mod export_json;
 pub mod gene;
 pub mod genome;
@@ -20,35 +21,37 @@ mod gpu_native;
 pub mod graph;
 pub mod ids;
 pub mod innovation;
+mod native;
 pub mod network;
 pub mod policy_bridge;
 mod policy_gpu_native;
 pub mod population;
 pub mod reporting;
 pub mod reproduction;
-pub mod runtime;
 pub mod species;
 pub mod stagnation;
 pub mod statistics;
-pub mod train_runner;
 
 pub use compat::{
     js::{
         default_node_bin, evaluate_policy_batch, native_policy_cuda_available,
-        run_neat_eval_worker, CompiledPolicyNodeEval, CompiledPolicyRequest, CompiledPolicyResult,
+        run_neat_eval_worker, BridgeEarlyStopConfig, BridgeGameCount, BridgeJsonArrayArg,
+        BridgeNativeInferenceBackend, BridgeOpponent, BridgeSeat, BridgeStepCount,
+        BridgeTurnPolicy, CompiledPolicyNodeEval, CompiledPolicyRequest, CompiledPolicyResult,
         CompiledPolicySnapshot, CompiledPolicySpec, EvalBridgeError, EvalBridgeOptions,
-        EvalBridgeOutput, PolicyBridgeBackend, PolicyBridgeError, PolicyIncomingEdge,
+        EvalBridgeOutput, EvalSeed, NodeCommand, PolicyBridgeBackend, PolicyBridgeError,
+        PolicyIncomingEdge,
     },
-    neat_python::{
-        export_genome_json, export_neat_python_genome_json, load_neat_python_config,
-        new_rust_checkpoint_sink, new_rust_checkpointer, restore_rust_checkpoint,
-        save_rust_checkpoint, ActivationConfig, AggregationConfig, BoolAttributeConfig,
-        CheckpointError, Checkpointer, CompatibilityExcessCoefficient, Config, ConfigError,
-        ConnectionGeneConfig, FitnessCriterion, FitnessSharingMode, FloatAttributeConfig,
-        FloatInitType, GenomeConfig, GenomeJsonOptions, InitialConnection, InitialConnectionMode,
-        NeatConfig, ReproductionConfig, RustCheckpointSink, SpawnMethod, SpeciesFitnessFunction,
+    neat_format::{
+        export_genome_json, export_neat_genome_json, load_neat_config, new_rust_checkpoint_sink,
+        new_rust_checkpointer, restore_rust_checkpoint, save_rust_checkpoint, ActivationConfig,
+        AggregationConfig, BoolAttributeConfig, CheckpointError, Checkpointer,
+        CompatibilityExcessCoefficient, Config, ConfigError, ConnectionGeneConfig,
+        FitnessCriterion, FitnessSharingMode, FloatAttributeConfig, FloatInitType, GenomeConfig,
+        GenomeJsonOptions, InitialConnection, InitialConnectionMode, NeatConfig,
+        ReproductionConfig, RustCheckpointSink, SpawnMethod, SpeciesFitnessFunction,
         SpeciesSetConfig, StagnationConfig, StringAttributeConfig, StructuralMutationSurer,
-        TargetNumSpecies, NEAT_PYTHON_GENOME_FORMAT,
+        TargetNumSpecies, NEAT_GENOME_FORMAT,
     },
 };
 pub use core::{
@@ -98,7 +101,3 @@ pub use core::{
     },
 };
 pub use ids::{GenomeId, SpeciesId};
-pub use runtime::kflower::{
-    run_kflower_training, TrainEvalBackend, TrainRunSummary, TrainRunnerError, TrainRunnerOptions,
-    TrainRuntimeConfig,
-};

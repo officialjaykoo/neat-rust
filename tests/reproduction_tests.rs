@@ -1,7 +1,7 @@
 use neat_rust::{adjust_spawn_exact, compute_spawn_proportional, ReproductionError};
 
 #[test]
-fn proportional_spawn_matches_neat_python_21_canonical_allocation() {
+fn proportional_spawn_matches_canonical_allocation() {
     let spawn = compute_spawn_proportional(&[1.0, 3.0, 6.0], 10, 1);
 
     assert_eq!(spawn, vec![1, 3, 6]);

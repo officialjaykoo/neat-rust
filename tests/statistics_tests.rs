@@ -4,7 +4,7 @@ use std::fs;
 use neat_rust::{DefaultGenome, FitnessCriterion, GenomeId, SpeciesId, StatisticsReporter};
 
 #[test]
-fn statistics_reporter_matches_neat_python_species_tables() {
+fn statistics_reporter_matches_canonical_species_tables() {
     let mut stats = StatisticsReporter::new();
     stats.generation_statistics = vec![
         BTreeMap::from([

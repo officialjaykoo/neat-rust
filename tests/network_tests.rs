@@ -1,16 +1,15 @@
-use std::collections::BTreeMap;
-use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
 
 use neat_rust::{
-    ActivationFunction, AggregationFunction, Config, ConnectionKey, Ctrnn, CtrnnNodeEval,
-    DefaultConnectionGene, DefaultGenome, DefaultNodeGene, FeedForwardError, FeedForwardNetwork,
-    Iznn, NodeEval, RecurrentError, RecurrentNetwork, RecurrentNodeEval, XorShiftRng,
+    ActivationFunction, AggregationFunction, Config, ConnectionKey, Ctrnn, DefaultConnectionGene,
+    DefaultGenome, DefaultNodeGene, FeedForwardError, FeedForwardNetwork, Iznn, NodeEval,
+    RecurrentError, RecurrentNetwork, RecurrentNodeEval, XorShiftRng,
 };
 
 fn repo_path(relative: &str) -> PathBuf {
-    let relative = relative.strip_prefix("scripts/configs/").unwrap_or(relative);
+    let relative = relative
+        .strip_prefix("scripts/configs/")
+        .unwrap_or(relative);
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("fixtures")
@@ -199,7 +198,7 @@ fn recurrent_network_uses_previous_state_for_self_loop() {
 }
 
 #[test]
-fn ctrnn_uses_neat_python_21_exponential_euler_advance() {
+fn ctrnn_uses_exponential_euler_advance() {
     let config = Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.ini"))
         .expect("config should parse");
     let mut rng = XorShiftRng::seed_from_u64(5);
@@ -273,183 +272,4 @@ fn iznn_spikes_and_resets_like_izhikevich_neuron() {
     let output_neuron = network.neurons.get(&0).expect("output neuron exists");
     assert_eq!(output_neuron.v, -65.0);
     assert!(output_neuron.u > output_neuron.b * output_neuron.v);
-}
-
-#[test]
-#[ignore = "requires external neat-python fixture repo and Python launcher"]
-fn xor_feed_forward_fixture_matches_neat_python_21_master() {
-    let run_python = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("run-python.ps1");
-    let neat_master = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join(".tmp")
-        .join("neat-python-master");
-    let neat_master_literal = format!("{:?}", neat_master.to_string_lossy());
-    let code = format!(
-        r#"import sys
-sys.path.insert(0, {neat_master_literal})
-from neat.activations import sigmoid_activation
-from neat.nn.feed_forward import FeedForwardNetwork
-node_evals = [
-    (1, sigmoid_activation, sum, -0.5, 1.0, [(-1, 1.0), (-2, 1.0)]),
-    (2, sigmoid_activation, sum, -1.5, 1.0, [(-1, 1.0), (-2, 1.0)]),
-    (0, sigmoid_activation, sum, -0.5, 1.0, [(1, 1.0), (2, -1.0)]),
-]
-net = FeedForwardNetwork([-1, -2], [0], node_evals)
-inputs = [(0.0, 0.0), (0.0, 1.0), (1.0, 0.0), (1.0, 1.0)]
-values = [net.activate(row)[0] for row in inputs]
-print(",".join(format(value, ".17g") for value in values))
-"#,
-        neat_master_literal = neat_master_literal
-    );
-    let script_path =
-        std::env::temp_dir().join(format!("neat_rust_xor_21_{}.py", std::process::id()));
-    fs::write(&script_path, code).expect("python xor parity script should be written");
-    let output = Command::new("powershell")
-        .arg("-NoProfile")
-        .arg("-ExecutionPolicy")
-        .arg("Bypass")
-        .arg("-File")
-        .arg(run_python)
-        .arg(&script_path)
-        .output()
-        .expect("python xor parity fixture should run");
-    let _ = fs::remove_file(&script_path);
-    assert!(
-        output.status.success(),
-        "python xor parity fixture failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let python_stdout = String::from_utf8_lossy(&output.stdout);
-    let python_values: Vec<f64> = python_stdout
-        .trim()
-        .split(',')
-        .map(|value| value.parse::<f64>().expect("python value should parse"))
-        .collect();
-    assert_eq!(python_values.len(), 4);
-
-    let mut network = FeedForwardNetwork::new(
-        vec![-1, -2],
-        vec![0],
-        vec![
-            NodeEval {
-                node: 1,
-                activation: ActivationFunction::Sigmoid,
-                aggregation: AggregationFunction::Sum,
-                bias: -0.5,
-                response: 1.0,
-                links: vec![(-1, 1.0), (-2, 1.0)],
-            },
-            NodeEval {
-                node: 2,
-                activation: ActivationFunction::Sigmoid,
-                aggregation: AggregationFunction::Sum,
-                bias: -1.5,
-                response: 1.0,
-                links: vec![(-1, 1.0), (-2, 1.0)],
-            },
-            NodeEval {
-                node: 0,
-                activation: ActivationFunction::Sigmoid,
-                aggregation: AggregationFunction::Sum,
-                bias: -0.5,
-                response: 1.0,
-                links: vec![(1, 1.0), (2, -1.0)],
-            },
-        ],
-    );
-
-    let rust_values = [
-        network
-            .activate(&[0.0, 0.0])
-            .expect("xor 00 should activate")[0],
-        network
-            .activate(&[0.0, 1.0])
-            .expect("xor 01 should activate")[0],
-        network
-            .activate(&[1.0, 0.0])
-            .expect("xor 10 should activate")[0],
-        network
-            .activate(&[1.0, 1.0])
-            .expect("xor 11 should activate")[0],
-    ];
-
-    for (rust, python) in rust_values.iter().zip(python_values.iter()) {
-        assert!((rust - python).abs() < 1.0e-12);
-    }
-    assert!(rust_values[0] < 0.5);
-    assert!(rust_values[1] > 0.5);
-    assert!(rust_values[2] > 0.5);
-    assert!(rust_values[3] < 0.5);
-}
-
-#[test]
-#[ignore = "requires external neat-python fixture repo and Python launcher"]
-fn ctrnn_fixture_matches_neat_python_21_master() {
-    let run_python = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("run-python.ps1");
-    let neat_master = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join(".tmp")
-        .join("neat-python-master");
-    let neat_master_literal = format!("{:?}", neat_master.to_string_lossy());
-    let code = format!(
-        r#"import sys
-sys.path.insert(0, {neat_master_literal})
-from neat.ctrnn import CTRNN, CTRNNNodeEval
-net = CTRNN([-1], [0], {{0: CTRNNNodeEval(1.0, lambda x: x, sum, 0.0, 1.0, [(-1, 1.0)])}})
-values = [net.advance([1.0], 0.1, 0.1), net.advance([1.0], 0.1, 0.1)]
-print(",".join(format(row[0], ".17g") for row in values))
-"#,
-        neat_master_literal = neat_master_literal
-    );
-    let script_path =
-        std::env::temp_dir().join(format!("neat_rust_ctrnn_21_{}.py", std::process::id()));
-    fs::write(&script_path, code).expect("python parity script should be written");
-    let output = Command::new("powershell")
-        .arg("-NoProfile")
-        .arg("-ExecutionPolicy")
-        .arg("Bypass")
-        .arg("-File")
-        .arg(run_python)
-        .arg(&script_path)
-        .output()
-        .expect("python parity fixture should run");
-    let _ = fs::remove_file(&script_path);
-    assert!(
-        output.status.success(),
-        "python parity fixture failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let python_stdout = String::from_utf8_lossy(&output.stdout);
-    let python_values: Vec<f64> = python_stdout
-        .trim()
-        .split(',')
-        .map(|value| value.parse::<f64>().expect("python value should parse"))
-        .collect();
-    assert_eq!(python_values.len(), 2);
-
-    let mut node_evals = BTreeMap::new();
-    node_evals.insert(
-        0,
-        CtrnnNodeEval {
-            time_constant: 1.0,
-            activation: ActivationFunction::Identity,
-            aggregation: AggregationFunction::Sum,
-            bias: 0.0,
-            response: 1.0,
-            links: vec![(-1, 1.0)],
-        },
-    );
-    let mut rust = Ctrnn::new(vec![-1], vec![0], node_evals);
-    let first = rust
-        .advance(&[1.0], 0.1, Some(0.1))
-        .expect("rust ctrnn first advance should work");
-    let second = rust
-        .advance(&[1.0], 0.1, Some(0.1))
-        .expect("rust ctrnn second advance should work");
-    assert!((first[0] - python_values[0]).abs() < 1e-12);
-    assert!((second[0] - python_values[1]).abs() < 1e-12);
 }

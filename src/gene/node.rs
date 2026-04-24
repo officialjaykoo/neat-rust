@@ -1,32 +1,11 @@
-use std::error::Error;
-use std::fmt;
-
-use crate::activation::{ActivationError, ActivationFunction};
-use crate::aggregation::{AggregationError, AggregationFunction};
-use crate::attributes::{
-    AttributeError, BoolAttribute, FloatAttribute, RandomSource, StringAttribute,
-};
+use crate::activation::ActivationFunction;
+use crate::aggregation::AggregationFunction;
+use crate::attributes::{BoolAttribute, FloatAttribute, RandomSource, StringAttribute};
 use crate::config::GenomeConfig;
 
-pub type NodeKey = i64;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ConnectionKey {
-    pub input: NodeKey,
-    pub output: NodeKey,
-}
-
-impl ConnectionKey {
-    pub const fn new(input: NodeKey, output: NodeKey) -> Self {
-        Self { input, output }
-    }
-}
-
-impl fmt::Display for ConnectionKey {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "({}, {})", self.input, self.output)
-    }
-}
+use super::key::NodeKey;
+use super::util::{choose_copy, parse_activation, parse_aggregation};
+use super::GeneError;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DefaultNodeGene {
@@ -43,59 +22,6 @@ pub struct DefaultNodeGene {
     pub memory_gate_enabled: bool,
     pub memory_gate_bias: f64,
     pub memory_gate_response: f64,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct DefaultConnectionGene {
-    pub key: ConnectionKey,
-    pub innovation: Option<i64>,
-    pub weight: f64,
-    pub enabled: bool,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum GeneError {
-    Attribute(AttributeError),
-    Activation(ActivationError),
-    Aggregation(AggregationError),
-    InnovationMismatch { left: i64, right: i64 },
-    KeyMismatch { left: String, right: String },
-}
-
-impl fmt::Display for GeneError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Attribute(err) => write!(f, "{err}"),
-            Self::Activation(err) => write!(f, "{err}"),
-            Self::Aggregation(err) => write!(f, "{err}"),
-            Self::InnovationMismatch { left, right } => {
-                write!(f, "gene innovation mismatch: left={left}, right={right}")
-            }
-            Self::KeyMismatch { left, right } => {
-                write!(f, "gene key mismatch: left={left}, right={right}")
-            }
-        }
-    }
-}
-
-impl Error for GeneError {}
-
-impl From<AttributeError> for GeneError {
-    fn from(value: AttributeError) -> Self {
-        Self::Attribute(value)
-    }
-}
-
-impl From<ActivationError> for GeneError {
-    fn from(value: ActivationError) -> Self {
-        Self::Activation(value)
-    }
-}
-
-impl From<AggregationError> for GeneError {
-    fn from(value: AggregationError) -> Self {
-        Self::Aggregation(value)
-    }
 }
 
 impl DefaultNodeGene {
@@ -240,125 +166,4 @@ impl DefaultNodeGene {
 
         Ok(distance * config.compatibility_weight_coefficient)
     }
-}
-
-impl DefaultConnectionGene {
-    pub fn new(key: ConnectionKey) -> Self {
-        Self {
-            key,
-            innovation: None,
-            weight: 0.0,
-            enabled: false,
-        }
-    }
-
-    pub fn with_innovation(key: ConnectionKey, innovation: i64) -> Self {
-        let mut gene = Self::new(key);
-        gene.innovation = Some(innovation);
-        gene
-    }
-
-    pub fn initialized(
-        key: ConnectionKey,
-        config: &GenomeConfig,
-        rng: &mut impl RandomSource,
-    ) -> Result<Self, GeneError> {
-        let mut gene = Self::new(key);
-        gene.init_attributes(config, rng)?;
-        Ok(gene)
-    }
-
-    pub fn initialized_with_innovation(
-        key: ConnectionKey,
-        innovation: i64,
-        config: &GenomeConfig,
-        rng: &mut impl RandomSource,
-    ) -> Result<Self, GeneError> {
-        let mut gene = Self::with_innovation(key, innovation);
-        gene.init_attributes(config, rng)?;
-        Ok(gene)
-    }
-
-    pub fn init_attributes(
-        &mut self,
-        config: &GenomeConfig,
-        rng: &mut impl RandomSource,
-    ) -> Result<(), GeneError> {
-        self.weight = FloatAttribute::init_value(&config.weight, rng)?;
-        self.enabled = BoolAttribute::init_value(&config.enabled, rng);
-        Ok(())
-    }
-
-    pub fn mutate(
-        &mut self,
-        config: &GenomeConfig,
-        rng: &mut impl RandomSource,
-    ) -> Result<(), GeneError> {
-        self.weight = FloatAttribute::mutate_value(self.weight, &config.weight, rng)?;
-        self.enabled = BoolAttribute::mutate_value(self.enabled, &config.enabled, rng);
-        Ok(())
-    }
-
-    pub fn crossover(&self, other: &Self, rng: &mut impl RandomSource) -> Result<Self, GeneError> {
-        if self.key != other.key {
-            return Err(GeneError::KeyMismatch {
-                left: self.key.to_string(),
-                right: other.key.to_string(),
-            });
-        }
-        if let (Some(left), Some(right)) = (self.innovation, other.innovation) {
-            if left != right {
-                return Err(GeneError::InnovationMismatch { left, right });
-            }
-        }
-
-        let weight = choose_copy(self.weight, other.weight, rng);
-        let mut enabled = choose_copy(self.enabled, other.enabled, rng);
-        if !self.enabled || !other.enabled {
-            enabled = rng.next_f64() >= 0.75;
-        }
-
-        Ok(Self {
-            key: self.key,
-            innovation: self.innovation.or(other.innovation),
-            weight,
-            enabled,
-        })
-    }
-
-    pub fn distance(&self, other: &Self, config: &GenomeConfig) -> Result<f64, GeneError> {
-        if self.key != other.key {
-            return Err(GeneError::KeyMismatch {
-                left: self.key.to_string(),
-                right: other.key.to_string(),
-            });
-        }
-
-        let mut distance = (self.weight - other.weight).abs();
-        if self.enabled != other.enabled {
-            distance += config.compatibility_enable_penalty;
-        }
-
-        Ok(distance * config.compatibility_weight_coefficient)
-    }
-}
-
-fn choose_first(rng: &mut impl RandomSource) -> bool {
-    rng.next_f64() > 0.5
-}
-
-fn choose_copy<T: Copy>(first: T, second: T, rng: &mut impl RandomSource) -> T {
-    if choose_first(rng) {
-        first
-    } else {
-        second
-    }
-}
-
-fn parse_activation(name: String) -> Result<ActivationFunction, GeneError> {
-    ActivationFunction::from_name(&name).ok_or_else(|| ActivationError::unknown(&name).into())
-}
-
-fn parse_aggregation(name: String) -> Result<AggregationFunction, GeneError> {
-    AggregationFunction::from_name(&name).ok_or_else(|| AggregationError::unknown(&name).into())
 }

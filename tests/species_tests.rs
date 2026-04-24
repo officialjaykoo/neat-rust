@@ -4,7 +4,9 @@ use std::path::PathBuf;
 use neat_rust::{Config, DefaultGenome, GenomeId, Population, SpeciesId, SpeciesSet, XorShiftRng};
 
 fn repo_path(relative: &str) -> PathBuf {
-    let relative = relative.strip_prefix("scripts/configs/").unwrap_or(relative);
+    let relative = relative
+        .strip_prefix("scripts/configs/")
+        .unwrap_or(relative);
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("fixtures")
