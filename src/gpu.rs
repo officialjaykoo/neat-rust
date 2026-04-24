@@ -7,12 +7,12 @@ use crate::aggregation::AggregationFunction;
 use crate::config::{Config, GenomeConfig};
 use crate::gene::{ConnectionKey, DefaultConnectionGene, NodeKey};
 use crate::genome::{input_keys, output_keys, DefaultGenome};
-use crate::gpu_native::{
+use crate::graph::required_for_output;
+use crate::ids::GenomeId;
+use crate::native::gpu::{
     ctrnn_native_supported, evaluate_ctrnn_batch_native, evaluate_iznn_batch_native,
     iznn_native_supported,
 };
-use crate::graph::required_for_output;
-use crate::ids::GenomeId;
 
 pub type OutputTrajectory = Vec<Vec<f64>>;
 
@@ -587,7 +587,7 @@ where
 }
 
 pub fn native_cuda_available() -> bool {
-    crate::gpu_native::native_cuda_available()
+    crate::native::gpu::native_cuda_available()
 }
 
 struct PackingInfo<'a> {

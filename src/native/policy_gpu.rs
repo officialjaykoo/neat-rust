@@ -1,9 +1,13 @@
 #[cfg(windows)]
 use std::collections::BTreeMap;
+use std::error::Error;
+use std::fmt;
 
 #[cfg(windows)]
 use crate::policy_bridge::CompiledPolicySnapshot;
 use crate::policy_bridge::{CompiledPolicyRequest, CompiledPolicyResult, CompiledPolicySpec};
+#[cfg(windows)]
+use crate::policy_bridge::{PolicyAggregation, PolicyIncomingSource, PolicyRuntimeBackend};
 
 #[cfg(windows)]
 const CUDA_KERNEL_SOURCE: &str = include_str!("../cuda_kernels.cu");
@@ -15,9 +19,104 @@ pub(crate) fn native_cuda_available() -> bool {
 pub(crate) fn evaluate_policy_batch_native(
     spec: &CompiledPolicySpec,
     request: &CompiledPolicyRequest,
-) -> Result<CompiledPolicyResult, String> {
+) -> Result<CompiledPolicyResult, NativePolicyGpuError> {
     imp::evaluate_policy_batch_native(spec, request)
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NativePolicyGpuError {
+    UnsupportedPlatform,
+    PtxCompilerNotFound,
+    PtxCompileFailed {
+        compiler: String,
+        stderr: String,
+    },
+    PtxProcessLaunch {
+        compiler: String,
+        message: String,
+    },
+    PtxFileIo {
+        operation: &'static str,
+        path: String,
+        message: String,
+    },
+    PtxContainsNul,
+    PtxEmpty,
+    DriverLibraryUnavailable(&'static str),
+    DriverSymbolMissing(&'static str),
+    DriverUnavailable(&'static str),
+    CudaDriver {
+        operation: &'static str,
+        code: i32,
+    },
+    NoCudaDevice,
+    SharedMemoryExceeded {
+        required: usize,
+        limit: usize,
+    },
+    UnsupportedAggregation {
+        node_id: i64,
+        aggregation: String,
+    },
+    BufferOverflow(&'static str),
+    MissingRecurrentBuffer(&'static str),
+    InputRowSizeMismatch {
+        expected: usize,
+        actual: usize,
+    },
+}
+
+impl fmt::Display for NativePolicyGpuError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnsupportedPlatform => {
+                write!(f, "native CUDA policy bridge is unavailable on this platform")
+            }
+            Self::PtxCompilerNotFound => write!(f, "clang++ not found for CUDA PTX compilation"),
+            Self::PtxCompileFailed { compiler, stderr } => {
+                write!(f, "failed to compile CUDA PTX with {compiler}: {stderr}")
+            }
+            Self::PtxProcessLaunch { compiler, message } => {
+                write!(f, "failed to run {compiler}: {message}")
+            }
+            Self::PtxFileIo {
+                operation,
+                path,
+                message,
+            } => write!(f, "failed to {operation} PTX file {path}: {message}"),
+            Self::PtxContainsNul => write!(f, "PTX contains NUL byte"),
+            Self::PtxEmpty => write!(f, "compiled CUDA PTX was empty"),
+            Self::DriverLibraryUnavailable(name) => write!(f, "{name} is unavailable"),
+            Self::DriverSymbolMissing(name) => write!(f, "{name} symbol is unavailable"),
+            Self::DriverUnavailable(operation) => write!(f, "{operation} is unavailable"),
+            Self::CudaDriver { operation, code } => {
+                write!(f, "{operation} failed with CUDA error {code}")
+            }
+            Self::NoCudaDevice => write!(f, "no CUDA device found"),
+            Self::SharedMemoryExceeded { required, limit } => write!(
+                f,
+                "policy CUDA kernel requires {required} bytes shared memory; limit is {limit}"
+            ),
+            Self::UnsupportedAggregation {
+                node_id,
+                aggregation,
+            } => write!(
+                f,
+                "native policy CUDA currently supports only sum aggregation; node {node_id} uses {aggregation}"
+            ),
+            Self::BufferOverflow(label) => write!(f, "{label} size overflow"),
+            Self::MissingRecurrentBuffer(label) => {
+                write!(f, "missing recurrent {label} device buffer")
+            }
+            Self::InputRowSizeMismatch { expected, actual } => write!(
+                f,
+                "policy input row size mismatch: expected {expected}, got {actual}"
+            ),
+        }
+    }
+}
+
+impl Error for NativePolicyGpuError {}
 
 #[cfg(not(windows))]
 mod imp {
@@ -30,8 +129,8 @@ mod imp {
     pub(crate) fn evaluate_policy_batch_native(
         _spec: &CompiledPolicySpec,
         _request: &CompiledPolicyRequest,
-    ) -> Result<CompiledPolicyResult, String> {
-        Err("native CUDA policy bridge is only available on Windows in this build".to_string())
+    ) -> Result<CompiledPolicyResult, NativePolicyGpuError> {
+        Err(NativePolicyGpuError::UnsupportedPlatform)
     }
 }
 
@@ -58,7 +157,7 @@ mod imp {
 
     const CUDA_SUCCESS: CuResult = 0;
     const SHARED_LIMIT_BYTES: usize = 48 * 1024;
-    static CUDA_PTX_CACHE: OnceLock<Result<String, String>> = OnceLock::new();
+    static CUDA_PTX_CACHE: OnceLock<Result<String, NativePolicyGpuError>> = OnceLock::new();
 
     type CuInit = unsafe extern "system" fn(u32) -> CuResult;
     type CuDeviceGetCount = unsafe extern "system" fn(*mut c_int) -> CuResult;
@@ -104,7 +203,7 @@ mod imp {
     pub(crate) fn evaluate_policy_batch_native(
         spec: &CompiledPolicySpec,
         request: &CompiledPolicyRequest,
-    ) -> Result<CompiledPolicyResult, String> {
+    ) -> Result<CompiledPolicyResult, NativePolicyGpuError> {
         ensure_supported(spec)?;
         let batch_size = request.inputs.len();
         if batch_size == 0 {
@@ -115,7 +214,7 @@ mod imp {
                 } else {
                     None
                 },
-                backend_used: "cuda_native".to_string(),
+                backend_used: PolicyRuntimeBackend::CudaNative,
             });
         }
 
@@ -146,7 +245,7 @@ mod imp {
             &driver,
             batch_size
                 .checked_mul(spec.output_indices.len())
-                .ok_or_else(|| "policy output buffer size overflow".to_string())?,
+                .ok_or(NativePolicyGpuError::BufferOverflow("policy output buffer"))?,
         )?;
 
         let mut d_memory_gate_enabled = None;
@@ -165,9 +264,9 @@ mod imp {
                 &driver,
                 &packed.memory_gate_response,
             )?);
-            let snapshot_len = batch_size
-                .checked_mul(spec.node_evals.len())
-                .ok_or_else(|| "policy snapshot buffer size overflow".to_string())?;
+            let snapshot_len = batch_size.checked_mul(spec.node_evals.len()).ok_or(
+                NativePolicyGpuError::BufferOverflow("policy snapshot buffer"),
+            )?;
             d_snapshots_in = Some(DeviceBuffer::from_slice(&driver, &base_snapshot)?);
             d_snapshots_out = Some(DeviceBuffer::zeroed::<f32>(&driver, snapshot_len)?);
         }
@@ -181,19 +280,25 @@ mod imp {
         if spec.is_recurrent() {
             let d_memory_gate_enabled = d_memory_gate_enabled
                 .as_ref()
-                .ok_or_else(|| "missing recurrent gate device buffer".to_string())?;
+                .ok_or(NativePolicyGpuError::MissingRecurrentBuffer("gate"))?;
             let d_memory_gate_bias = d_memory_gate_bias
                 .as_ref()
-                .ok_or_else(|| "missing recurrent gate bias device buffer".to_string())?;
-            let d_memory_gate_response = d_memory_gate_response
-                .as_ref()
-                .ok_or_else(|| "missing recurrent gate response device buffer".to_string())?;
-            let d_snapshots_in = d_snapshots_in
-                .as_ref()
-                .ok_or_else(|| "missing recurrent snapshot input buffer".to_string())?;
-            let d_snapshots_out = d_snapshots_out
-                .as_ref()
-                .ok_or_else(|| "missing recurrent snapshot output buffer".to_string())?;
+                .ok_or(NativePolicyGpuError::MissingRecurrentBuffer("gate bias"))?;
+            let d_memory_gate_response = d_memory_gate_response.as_ref().ok_or(
+                NativePolicyGpuError::MissingRecurrentBuffer("gate response"),
+            )?;
+            let d_snapshots_in =
+                d_snapshots_in
+                    .as_ref()
+                    .ok_or(NativePolicyGpuError::MissingRecurrentBuffer(
+                        "snapshot input",
+                    ))?;
+            let d_snapshots_out =
+                d_snapshots_out
+                    .as_ref()
+                    .ok_or(NativePolicyGpuError::MissingRecurrentBuffer(
+                        "snapshot output",
+                    ))?;
 
             let mut params = [
                 ptr_to_kernel_arg(&d_activation.ptr),
@@ -250,20 +355,20 @@ mod imp {
         }
 
         let raw_outputs = d_outputs.copy_to_vec::<f32>(
-            batch_size
-                .checked_mul(spec.output_indices.len())
-                .ok_or_else(|| "policy output host copy size overflow".to_string())?,
+            batch_size.checked_mul(spec.output_indices.len()).ok_or(
+                NativePolicyGpuError::BufferOverflow("policy output host copy"),
+            )?,
         )?;
         let outputs = reshape_outputs(&raw_outputs, batch_size, spec.output_indices.len());
         let snapshots = if spec.is_recurrent() {
             let raw_snapshots = d_snapshots_out
                 .as_ref()
-                .ok_or_else(|| "missing recurrent snapshot output buffer".to_string())?
-                .copy_to_vec::<f32>(
-                    batch_size
-                        .checked_mul(spec.node_evals.len())
-                        .ok_or_else(|| "policy snapshot host copy size overflow".to_string())?,
-                )?;
+                .ok_or(NativePolicyGpuError::MissingRecurrentBuffer(
+                    "snapshot output",
+                ))?
+                .copy_to_vec::<f32>(batch_size.checked_mul(spec.node_evals.len()).ok_or(
+                    NativePolicyGpuError::BufferOverflow("policy snapshot host copy"),
+                )?)?;
             Some(reshape_snapshots(spec, &raw_snapshots, batch_size))
         } else {
             None
@@ -272,25 +377,26 @@ mod imp {
         Ok(CompiledPolicyResult {
             outputs,
             snapshots,
-            backend_used: "cuda_native".to_string(),
+            backend_used: PolicyRuntimeBackend::CudaNative,
         })
     }
 
-    fn ensure_supported(spec: &CompiledPolicySpec) -> Result<(), String> {
+    fn ensure_supported(spec: &CompiledPolicySpec) -> Result<(), NativePolicyGpuError> {
         compiled_ptx()?;
         let shared_bytes = policy_shared_bytes(spec.node_evals.len())?;
         if shared_bytes > SHARED_LIMIT_BYTES {
-            return Err(format!(
-                "policy CUDA kernel requires {shared_bytes} bytes shared memory; limit is {SHARED_LIMIT_BYTES}"
-            ));
+            return Err(NativePolicyGpuError::SharedMemoryExceeded {
+                required: shared_bytes,
+                limit: SHARED_LIMIT_BYTES,
+            });
         }
         for node in &spec.node_evals {
-            native_activation_code(&node.activation)?;
-            if !node.aggregation.trim().eq_ignore_ascii_case("sum") {
-                return Err(format!(
-                    "native policy CUDA currently supports only sum aggregation; node {} uses {}",
-                    node.node_id, node.aggregation
-                ));
+            let _ = node.activation.cuda_code();
+            if node.aggregation != PolicyAggregation::Sum {
+                return Err(NativePolicyGpuError::UnsupportedAggregation {
+                    node_id: node.node_id,
+                    aggregation: node.aggregation.as_str().to_string(),
+                });
             }
         }
         Ok(())
@@ -324,18 +430,21 @@ mod imp {
         snapshots
     }
 
-    fn flatten_inputs_as_f32(input_count: usize, rows: &[Vec<f64>]) -> Result<Vec<f32>, String> {
+    fn flatten_inputs_as_f32(
+        input_count: usize,
+        rows: &[Vec<f64>],
+    ) -> Result<Vec<f32>, NativePolicyGpuError> {
         let mut flat = Vec::with_capacity(
             rows.len()
                 .checked_mul(input_count)
-                .ok_or_else(|| "policy input buffer size overflow".to_string())?,
+                .ok_or(NativePolicyGpuError::BufferOverflow("policy input buffer"))?,
         );
         for row in rows {
             if row.len() != input_count {
-                return Err(format!(
-                    "policy input row size mismatch: expected {input_count}, got {}",
-                    row.len()
-                ));
+                return Err(NativePolicyGpuError::InputRowSizeMismatch {
+                    expected: input_count,
+                    actual: row.len(),
+                });
             }
             for value in row {
                 flat.push(*value as f32);
@@ -364,26 +473,10 @@ mod imp {
         repeated
     }
 
-    fn policy_shared_bytes(node_count: usize) -> Result<usize, String> {
-        node_count
-            .checked_mul(mem::size_of::<f32>())
-            .ok_or_else(|| "policy CUDA shared memory size overflow".to_string())
-    }
-
-    fn native_activation_code(value: &str) -> Result<i32, String> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "sigmoid" => Ok(0),
-            "tanh" => Ok(1),
-            "relu" => Ok(2),
-            "identity" | "linear" => Ok(3),
-            "clamped" => Ok(4),
-            "gauss" => Ok(5),
-            "sin" => Ok(6),
-            "abs" => Ok(7),
-            other => Err(format!(
-                "native policy CUDA does not support activation {other:?}"
-            )),
-        }
+    fn policy_shared_bytes(node_count: usize) -> Result<usize, NativePolicyGpuError> {
+        Ok(node_count.checked_mul(mem::size_of::<f32>()).ok_or(
+            NativePolicyGpuError::BufferOverflow("policy CUDA shared memory"),
+        )?)
     }
 
     struct PackedPolicyModel {
@@ -401,7 +494,7 @@ mod imp {
     }
 
     impl PackedPolicyModel {
-        fn from_spec(spec: &CompiledPolicySpec) -> Result<Self, String> {
+        fn from_spec(spec: &CompiledPolicySpec) -> Result<Self, NativePolicyGpuError> {
             let mut activation_codes = Vec::with_capacity(spec.node_evals.len());
             let mut bias = Vec::with_capacity(spec.node_evals.len());
             let mut response = Vec::with_capacity(spec.node_evals.len());
@@ -419,21 +512,16 @@ mod imp {
             }
             incoming_offsets.push(0);
             for node in &spec.node_evals {
-                activation_codes.push(native_activation_code(&node.activation)?);
+                activation_codes.push(node.activation.cuda_code());
                 bias.push(node.bias as f32);
                 response.push(node.response as f32);
                 memory_gate_enabled.push(u8::from(node.memory_gate_enabled));
                 memory_gate_bias.push(node.memory_gate_bias as f32);
                 memory_gate_response.push(node.memory_gate_response as f32);
                 for edge in &node.incoming {
-                    let kind = match edge.source_kind.trim().to_ascii_lowercase().as_str() {
-                        "input" => 0,
-                        "node" => 1,
-                        other => {
-                            return Err(format!(
-                                "unsupported policy source kind {other:?} in native CUDA"
-                            ))
-                        }
+                    let kind = match edge.source_kind {
+                        PolicyIncomingSource::Input => 0,
+                        PolicyIncomingSource::Node => 1,
                     };
                     source_kind.push(kind);
                     source_index.push(edge.source_index as i32);
@@ -458,7 +546,7 @@ mod imp {
         }
     }
 
-    fn compiled_ptx() -> Result<&'static str, String> {
+    fn compiled_ptx() -> Result<&'static str, NativePolicyGpuError> {
         let cached = CUDA_PTX_CACHE.get_or_init(compile_ptx_to_string);
         match cached {
             Ok(ptx) => Ok(ptx.as_str()),
@@ -466,14 +554,23 @@ mod imp {
         }
     }
 
-    fn compile_ptx_to_string() -> Result<String, String> {
-        let clang =
-            find_clang().ok_or_else(|| "clang++ not found for CUDA PTX compilation".to_string())?;
+    fn compile_ptx_to_string() -> Result<String, NativePolicyGpuError> {
+        let clang = find_clang().ok_or(NativePolicyGpuError::PtxCompilerNotFound)?;
         let temp_dir = env::temp_dir().join("neat_rust_cuda_runtime");
-        fs::create_dir_all(&temp_dir).map_err(|err| err.to_string())?;
+        fs::create_dir_all(&temp_dir).map_err(|err| NativePolicyGpuError::PtxFileIo {
+            operation: "create temp directory for",
+            path: temp_dir.display().to_string(),
+            message: err.to_string(),
+        })?;
         let src_path = temp_dir.join("gpu_kernels.cu");
         let ptx_path = temp_dir.join("gpu_kernels.ptx");
-        fs::write(&src_path, CUDA_KERNEL_SOURCE).map_err(|err| err.to_string())?;
+        fs::write(&src_path, CUDA_KERNEL_SOURCE).map_err(|err| {
+            NativePolicyGpuError::PtxFileIo {
+                operation: "write source for",
+                path: src_path.display().to_string(),
+                message: err.to_string(),
+            }
+        })?;
         let output = Command::new(&clang)
             .arg("--cuda-device-only")
             .arg("--cuda-gpu-arch=sm_50")
@@ -485,18 +582,24 @@ mod imp {
             .arg("-o")
             .arg(&ptx_path)
             .output()
-            .map_err(|err| format!("failed to run {}: {err}", clang.display()))?;
+            .map_err(|err| NativePolicyGpuError::PtxProcessLaunch {
+                compiler: clang.display().to_string(),
+                message: err.to_string(),
+            })?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!(
-                "failed to compile CUDA PTX with {}: {}",
-                clang.display(),
-                stderr.trim()
-            ));
+            return Err(NativePolicyGpuError::PtxCompileFailed {
+                compiler: clang.display().to_string(),
+                stderr: stderr.trim().to_string(),
+            });
         }
-        let ptx = fs::read_to_string(&ptx_path).map_err(|err| err.to_string())?;
+        let ptx = fs::read_to_string(&ptx_path).map_err(|err| NativePolicyGpuError::PtxFileIo {
+            operation: "read compiled",
+            path: ptx_path.display().to_string(),
+            message: err.to_string(),
+        })?;
         if ptx.trim().is_empty() {
-            Err("compiled CUDA PTX was empty".to_string())
+            Err(NativePolicyGpuError::PtxEmpty)
         } else {
             Ok(ptx)
         }
@@ -559,51 +662,51 @@ mod imp {
     }
 
     impl CudaDriver {
-        fn load() -> Result<Self, String> {
+        fn load() -> Result<Self, NativePolicyGpuError> {
             let library = LibraryHandle::open("nvcuda.dll")
-                .ok_or_else(|| "nvcuda.dll is unavailable".to_string())?;
+                .ok_or(NativePolicyGpuError::DriverLibraryUnavailable("nvcuda.dll"))?;
             let cu_init = library
                 .symbol(b"cuInit\0")
-                .ok_or_else(|| "cuInit unavailable".to_string())?;
-            let cu_device_get_count = library
-                .symbol(b"cuDeviceGetCount\0")
-                .ok_or_else(|| "cuDeviceGetCount unavailable".to_string())?;
+                .ok_or(NativePolicyGpuError::DriverSymbolMissing("cuInit"))?;
+            let cu_device_get_count = library.symbol(b"cuDeviceGetCount\0").ok_or(
+                NativePolicyGpuError::DriverSymbolMissing("cuDeviceGetCount"),
+            )?;
             let cu_device_get = library
                 .symbol(b"cuDeviceGet\0")
-                .ok_or_else(|| "cuDeviceGet unavailable".to_string())?;
+                .ok_or(NativePolicyGpuError::DriverSymbolMissing("cuDeviceGet"))?;
             let cu_ctx_create = library
                 .symbol(b"cuCtxCreate_v2\0")
-                .ok_or_else(|| "cuCtxCreate_v2 unavailable".to_string())?;
+                .ok_or(NativePolicyGpuError::DriverSymbolMissing("cuCtxCreate_v2"))?;
             let cu_ctx_destroy = library
                 .symbol(b"cuCtxDestroy_v2\0")
-                .ok_or_else(|| "cuCtxDestroy_v2 unavailable".to_string())?;
-            let cu_module_load_data_ex = library
-                .symbol(b"cuModuleLoadDataEx\0")
-                .ok_or_else(|| "cuModuleLoadDataEx unavailable".to_string())?;
+                .ok_or(NativePolicyGpuError::DriverSymbolMissing("cuCtxDestroy_v2"))?;
+            let cu_module_load_data_ex = library.symbol(b"cuModuleLoadDataEx\0").ok_or(
+                NativePolicyGpuError::DriverSymbolMissing("cuModuleLoadDataEx"),
+            )?;
             let cu_module_unload = library
                 .symbol(b"cuModuleUnload\0")
-                .ok_or_else(|| "cuModuleUnload unavailable".to_string())?;
-            let cu_module_get_function = library
-                .symbol(b"cuModuleGetFunction\0")
-                .ok_or_else(|| "cuModuleGetFunction unavailable".to_string())?;
+                .ok_or(NativePolicyGpuError::DriverSymbolMissing("cuModuleUnload"))?;
+            let cu_module_get_function = library.symbol(b"cuModuleGetFunction\0").ok_or(
+                NativePolicyGpuError::DriverSymbolMissing("cuModuleGetFunction"),
+            )?;
             let cu_mem_alloc = library
                 .symbol(b"cuMemAlloc_v2\0")
-                .ok_or_else(|| "cuMemAlloc_v2 unavailable".to_string())?;
+                .ok_or(NativePolicyGpuError::DriverSymbolMissing("cuMemAlloc_v2"))?;
             let cu_mem_free = library
                 .symbol(b"cuMemFree_v2\0")
-                .ok_or_else(|| "cuMemFree_v2 unavailable".to_string())?;
+                .ok_or(NativePolicyGpuError::DriverSymbolMissing("cuMemFree_v2"))?;
             let cu_memcpy_htod = library
                 .symbol(b"cuMemcpyHtoD_v2\0")
-                .ok_or_else(|| "cuMemcpyHtoD_v2 unavailable".to_string())?;
+                .ok_or(NativePolicyGpuError::DriverSymbolMissing("cuMemcpyHtoD_v2"))?;
             let cu_memcpy_dtoh = library
                 .symbol(b"cuMemcpyDtoH_v2\0")
-                .ok_or_else(|| "cuMemcpyDtoH_v2 unavailable".to_string())?;
+                .ok_or(NativePolicyGpuError::DriverSymbolMissing("cuMemcpyDtoH_v2"))?;
             let cu_launch_kernel = library
                 .symbol(b"cuLaunchKernel\0")
-                .ok_or_else(|| "cuLaunchKernel unavailable".to_string())?;
-            let cu_ctx_synchronize = library
-                .symbol(b"cuCtxSynchronize\0")
-                .ok_or_else(|| "cuCtxSynchronize unavailable".to_string())?;
+                .ok_or(NativePolicyGpuError::DriverSymbolMissing("cuLaunchKernel"))?;
+            let cu_ctx_synchronize = library.symbol(b"cuCtxSynchronize\0").ok_or(
+                NativePolicyGpuError::DriverSymbolMissing("cuCtxSynchronize"),
+            )?;
 
             let driver = Self {
                 _library: library,
@@ -631,7 +734,7 @@ mod imp {
                 "cuDeviceGetCount",
             )?;
             if count < 1 {
-                return Err("no CUDA device found".to_string());
+                return Err(NativePolicyGpuError::NoCudaDevice);
             }
 
             let mut device = 0;
@@ -642,7 +745,7 @@ mod imp {
             Ok(Self { device, ..driver })
         }
 
-        fn create_context(&self) -> Result<CudaContext<'_>, String> {
+        fn create_context(&self) -> Result<CudaContext<'_>, NativePolicyGpuError> {
             let mut context = ptr::null_mut();
             self.result(
                 unsafe { (self.cu_ctx_create)(&mut context, 0, self.device) },
@@ -654,19 +757,26 @@ mod imp {
             })
         }
 
-        fn result(&self, code: CuResult, label: &str) -> Result<(), String> {
+        fn result(&self, code: CuResult, label: &'static str) -> Result<(), NativePolicyGpuError> {
             if code == CUDA_SUCCESS {
                 Ok(())
             } else {
-                Err(format!("{label} failed with CUDA error {code}"))
+                Err(NativePolicyGpuError::CudaDriver {
+                    operation: label,
+                    code,
+                })
             }
         }
 
-        fn unavailable_result(&self, code: CuResult, label: &str) -> Result<(), String> {
+        fn unavailable_result(
+            &self,
+            code: CuResult,
+            label: &'static str,
+        ) -> Result<(), NativePolicyGpuError> {
             if code == CUDA_SUCCESS {
                 Ok(())
             } else {
-                Err(format!("{label} is unavailable"))
+                Err(NativePolicyGpuError::DriverUnavailable(label))
             }
         }
 
@@ -677,7 +787,7 @@ mod imp {
             block_x: u32,
             shared_mem_bytes: u32,
             params: &mut [*mut c_void],
-        ) -> Result<(), String> {
+        ) -> Result<(), NativePolicyGpuError> {
             self.result(
                 unsafe {
                     (self.cu_launch_kernel)(
@@ -706,8 +816,8 @@ mod imp {
     }
 
     impl<'a> CudaContext<'a> {
-        fn load_module(&self, ptx: &str) -> Result<CudaModule<'a>, String> {
-            let ptx = CString::new(ptx).map_err(|_| "PTX contains NUL byte".to_string())?;
+        fn load_module(&self, ptx: &str) -> Result<CudaModule<'a>, NativePolicyGpuError> {
+            let ptx = CString::new(ptx).map_err(|_| NativePolicyGpuError::PtxContainsNul)?;
             let mut module = ptr::null_mut();
             self.driver.result(
                 unsafe {
@@ -744,7 +854,7 @@ mod imp {
     }
 
     impl<'a> CudaModule<'a> {
-        fn function(&self, name: &[u8]) -> Result<CuFunction, String> {
+        fn function(&self, name: &[u8]) -> Result<CuFunction, NativePolicyGpuError> {
             let mut function = ptr::null_mut();
             self.driver.result(
                 unsafe {
@@ -776,7 +886,10 @@ mod imp {
     }
 
     impl<'a> DeviceBuffer<'a> {
-        fn from_slice<T: Copy>(driver: &'a CudaDriver, values: &[T]) -> Result<Self, String> {
+        fn from_slice<T: Copy>(
+            driver: &'a CudaDriver,
+            values: &[T],
+        ) -> Result<Self, NativePolicyGpuError> {
             let bytes = mem::size_of_val(values);
             let mut ptr = 0;
             driver.result(
@@ -794,10 +907,10 @@ mod imp {
             Ok(Self { driver, ptr })
         }
 
-        fn zeroed<T>(driver: &'a CudaDriver, len: usize) -> Result<Self, String> {
-            let bytes = len
-                .checked_mul(mem::size_of::<T>())
-                .ok_or_else(|| "native CUDA device allocation size overflow".to_string())?;
+        fn zeroed<T>(driver: &'a CudaDriver, len: usize) -> Result<Self, NativePolicyGpuError> {
+            let bytes = len.checked_mul(mem::size_of::<T>()).ok_or(
+                NativePolicyGpuError::BufferOverflow("native CUDA device allocation"),
+            )?;
             let mut ptr = 0;
             driver.result(
                 unsafe { (driver.cu_mem_alloc)(&mut ptr, bytes) },
@@ -813,10 +926,13 @@ mod imp {
             Ok(Self { driver, ptr })
         }
 
-        fn copy_to_vec<T: Copy + Default>(&self, len: usize) -> Result<Vec<T>, String> {
-            let bytes = len
-                .checked_mul(mem::size_of::<T>())
-                .ok_or_else(|| "native CUDA host copy size overflow".to_string())?;
+        fn copy_to_vec<T: Copy + Default>(
+            &self,
+            len: usize,
+        ) -> Result<Vec<T>, NativePolicyGpuError> {
+            let bytes = len.checked_mul(mem::size_of::<T>()).ok_or(
+                NativePolicyGpuError::BufferOverflow("native CUDA host copy"),
+            )?;
             let mut values = vec![T::default(); len];
             if bytes > 0 {
                 self.driver.result(

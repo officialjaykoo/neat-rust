@@ -1,9 +1,15 @@
 use std::path::PathBuf;
 
 use neat_rust::{
-    ActivationFunction, AggregationFunction, Config, ConnectionKey, Ctrnn, DefaultConnectionGene,
-    DefaultGenome, DefaultNodeGene, FeedForwardError, FeedForwardNetwork, Iznn, NodeEval,
-    RecurrentError, RecurrentNetwork, RecurrentNodeEval, XorShiftRng,
+    algorithm::{
+        ConnectionKey, DefaultConnectionGene, DefaultGenome, DefaultNodeGene, XorShiftRng,
+    },
+    io::Config,
+    network::{
+        Ctrnn, FeedForwardError, FeedForwardNetwork, Iznn, NodeEval, RecurrentError,
+        RecurrentNetwork, RecurrentNodeEval,
+    },
+    prelude::{ActivationFunction, AggregationFunction},
 };
 
 fn repo_path(relative: &str) -> PathBuf {
@@ -11,8 +17,8 @@ fn repo_path(relative: &str) -> PathBuf {
         .strip_prefix("scripts/configs/")
         .unwrap_or(relative);
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
+        .join("..")
+        .join("scripts")
         .join("configs")
         .join(relative)
 }
@@ -23,7 +29,7 @@ fn key(input: i64, output: i64) -> ConnectionKey {
 
 #[test]
 fn feed_forward_network_computes_direct_outputs() {
-    let config = Config::from_file(repo_path("scripts/configs/neat_feedforward_memory8.ini"))
+    let config = Config::from_file(repo_path("scripts/configs/neat_feedforward_memory8.toml"))
         .expect("config should parse");
     let mut rng = XorShiftRng::seed_from_u64(3);
     let mut genome = DefaultGenome::new(0);
@@ -86,7 +92,7 @@ fn feed_forward_network_rejects_bad_input_count_like_simple_run() {
 
 #[test]
 fn feed_forward_network_handles_orphaned_hidden_node_bias() {
-    let config = Config::from_file(repo_path("scripts/configs/neat_feedforward_memory8.ini"))
+    let config = Config::from_file(repo_path("scripts/configs/neat_feedforward_memory8.toml"))
         .expect("config should parse");
     let mut genome = DefaultGenome::new(1);
 
@@ -160,7 +166,7 @@ fn recurrent_network_rejects_bad_input_count_like_simple_run() {
 
 #[test]
 fn recurrent_network_uses_previous_state_for_self_loop() {
-    let config = Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.ini"))
+    let config = Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.toml"))
         .expect("config should parse");
     let mut rng = XorShiftRng::seed_from_u64(4);
     let mut genome = DefaultGenome::new(0);
@@ -199,7 +205,7 @@ fn recurrent_network_uses_previous_state_for_self_loop() {
 
 #[test]
 fn ctrnn_uses_exponential_euler_advance() {
-    let config = Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.ini"))
+    let config = Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.toml"))
         .expect("config should parse");
     let mut rng = XorShiftRng::seed_from_u64(5);
     let mut genome = DefaultGenome::new(0);
@@ -238,7 +244,7 @@ fn ctrnn_uses_exponential_euler_advance() {
 
 #[test]
 fn iznn_spikes_and_resets_like_izhikevich_neuron() {
-    let config = Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.ini"))
+    let config = Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.toml"))
         .expect("config should parse");
     let mut rng = XorShiftRng::seed_from_u64(6);
     let mut genome = DefaultGenome::new(0);

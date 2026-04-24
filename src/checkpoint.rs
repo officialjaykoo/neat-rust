@@ -4,6 +4,8 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
+
 use crate::activation::ActivationFunction;
 use crate::aggregation::AggregationFunction;
 use crate::attributes::XorShiftRng;
@@ -15,6 +17,8 @@ use crate::innovation::InnovationTracker;
 use crate::population::Population;
 use crate::reproduction::ReproductionState;
 use crate::species::{Species, SpeciesSet};
+
+const CHECKPOINT_FORMAT_VERSION: &str = "neat_rust_checkpoint_v3";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Checkpointer {
@@ -29,16 +33,6 @@ pub enum CheckpointError {
     Config(String),
     Invalid(String),
     MissingConfigPath,
-}
-
-#[derive(Debug, Clone)]
-struct SpeciesMeta {
-    created: usize,
-    last_improved: usize,
-    representative_key: Option<GenomeId>,
-    fitness: Option<f64>,
-    adjusted_fitness: Option<f64>,
-    fitness_history: Vec<f64>,
 }
 
 impl Checkpointer {
@@ -72,15 +66,19 @@ impl Checkpointer {
                 fs::create_dir_all(parent).map_err(|err| CheckpointError::Io(err.to_string()))?;
             }
         }
-        fs::write(&path, checkpoint_text(self, population))
-            .map_err(|err| CheckpointError::Io(err.to_string()))?;
+
+        let document = CheckpointDocument::from_population(self, population);
+        let mut text = serde_json::to_string_pretty(&document)
+            .map_err(|err| CheckpointError::Invalid(err.to_string()))?;
+        text.push('\n');
+        fs::write(&path, text).map_err(|err| CheckpointError::Io(err.to_string()))?;
         Ok(path)
     }
 
     pub fn restore_checkpoint(path: impl AsRef<Path>) -> Result<Population, CheckpointError> {
         let text = fs::read_to_string(path.as_ref())
             .map_err(|err| CheckpointError::Io(err.to_string()))?;
-        restore_checkpoint_text(&text)
+        CheckpointDocument::from_json_text(&text)?.into_population()
     }
 }
 
@@ -97,626 +95,371 @@ impl fmt::Display for CheckpointError {
 
 impl Error for CheckpointError {}
 
-fn checkpoint_text(checkpointer: &Checkpointer, population: &Population) -> String {
-    let mut out = String::new();
-    key_value(&mut out, "format_version", "neat_rust_checkpoint_v2");
-    if let Some(config_path) = &checkpointer.config_path {
-        key_value(&mut out, "config_path", &config_path.to_string_lossy());
-    }
-    key_value(&mut out, "generation", &population.generation.to_string());
-    key_value(
-        &mut out,
-        "skip_first_evaluation",
-        bool_text(population.skip_first_evaluation),
-    );
-    key_value(&mut out, "rng_state", &population.rng_state().to_string());
-    key_value(
-        &mut out,
-        "genome_indexer",
-        &population.reproduction.genome_indexer.to_string(),
-    );
-    key_value(
-        &mut out,
-        "innovation",
-        &population
-            .reproduction
-            .innovation_tracker
-            .current_innovation_number()
-            .to_string(),
-    );
-    key_value(
-        &mut out,
-        "species_next_key",
-        &population.species.next_species_key().to_string(),
-    );
-    key_value(
-        &mut out,
-        "species_compatibility_threshold",
-        &option_f64(population.species.compatibility_threshold),
-    );
-
-    for genome in population.population.values() {
-        push_genome(&mut out, "population", genome);
-    }
-    if let Some(best) = &population.best_genome {
-        push_genome(&mut out, "best", best);
-    }
-
-    for (species_id, species) in &population.species.species {
-        line(
-            &mut out,
-            &[
-                "species".to_string(),
-                species_id.to_string(),
-                species.created.to_string(),
-                species.last_improved.to_string(),
-                species
-                    .representative
-                    .as_ref()
-                    .map(|genome| genome.key.to_string())
-                    .unwrap_or_else(|| "null".to_string()),
-                option_f64(species.fitness),
-                option_f64(species.adjusted_fitness),
-                species
-                    .fitness_history
-                    .iter()
-                    .map(|value| value.to_string())
-                    .collect::<Vec<_>>()
-                    .join(","),
-            ],
-        );
-        for member_id in species.members.keys() {
-            line(
-                &mut out,
-                &[
-                    "species_member".to_string(),
-                    species_id.to_string(),
-                    member_id.to_string(),
-                ],
-            );
-        }
-    }
-
-    for (child, parents) in &population.reproduction.ancestors {
-        line(
-            &mut out,
-            &[
-                "ancestor".to_string(),
-                child.to_string(),
-                option_genome_id(parents.0),
-                option_genome_id(parents.1),
-            ],
-        );
-    }
-
-    out
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CheckpointDocument {
+    format_version: String,
+    config_path: Option<PathBuf>,
+    generation: usize,
+    skip_first_evaluation: bool,
+    rng_state: u64,
+    reproduction: ReproductionDocument,
+    species_set: SpeciesSetDocument,
+    population: Vec<GenomeDocument>,
+    best_genome: Option<GenomeDocument>,
 }
 
-fn push_genome(out: &mut String, role: &str, genome: &DefaultGenome) {
-    line(
-        out,
-        &[
-            "genome".to_string(),
-            role.to_string(),
-            genome.key.to_string(),
-            option_f64(genome.fitness),
-        ],
-    );
-    for node in genome.nodes.values() {
-        line(
-            out,
-            &[
-                "node".to_string(),
-                role.to_string(),
-                genome.key.to_string(),
-                node.key.to_string(),
-                node.bias.to_string(),
-                node.response.to_string(),
-                node.activation.to_string(),
-                node.aggregation.to_string(),
-                node.time_constant.to_string(),
-                node.iz_a.to_string(),
-                node.iz_b.to_string(),
-                node.iz_c.to_string(),
-                node.iz_d.to_string(),
-                bool_text(node.memory_gate_enabled).to_string(),
-                node.memory_gate_bias.to_string(),
-                node.memory_gate_response.to_string(),
-            ],
-        );
-    }
-    for connection in genome.connections.values() {
-        line(
-            out,
-            &[
-                "connection".to_string(),
-                role.to_string(),
-                genome.key.to_string(),
-                connection.key.input.to_string(),
-                connection.key.output.to_string(),
-                option_i64(connection.innovation),
-                connection.weight.to_string(),
-                bool_text(connection.enabled).to_string(),
-            ],
-        );
-    }
-}
-
-fn restore_checkpoint_text(text: &str) -> Result<Population, CheckpointError> {
-    let mut format_version = String::new();
-    let mut config_path: Option<PathBuf> = None;
-    let mut generation = 0usize;
-    let mut skip_first_evaluation = false;
-    let mut rng_state = 1u64;
-    let mut genome_indexer = GenomeId::new(1);
-    let mut innovation = 0i64;
-    let mut species_next_key = SpeciesId::new(1);
-    let mut species_compatibility_threshold: Option<f64> = None;
-    let mut population: BTreeMap<GenomeId, DefaultGenome> = BTreeMap::new();
-    let mut best_genome: Option<DefaultGenome> = None;
-    let mut species_meta: BTreeMap<SpeciesId, SpeciesMeta> = BTreeMap::new();
-    let mut species_members: BTreeMap<SpeciesId, Vec<GenomeId>> = BTreeMap::new();
-    let mut ancestors: BTreeMap<GenomeId, (Option<GenomeId>, Option<GenomeId>)> = BTreeMap::new();
-
-    for raw_line in text.lines() {
-        if raw_line.is_empty() {
-            continue;
-        }
-        if let Some((key, value)) = raw_line.split_once('=') {
-            match key {
-                "format_version" => format_version = unescape_field(value),
-                "config_path" => config_path = Some(PathBuf::from(unescape_field(value))),
-                "generation" => generation = parse_usize(value, "generation")?,
-                "skip_first_evaluation" => {
-                    skip_first_evaluation = parse_bool(value, "skip_first_evaluation")?
-                }
-                "rng_state" => rng_state = parse_u64(value, "rng_state")?,
-                "genome_indexer" => genome_indexer = parse_genome_id(value, "genome_indexer")?,
-                "innovation" => innovation = parse_i64(value, "innovation")?,
-                "species_next_key" => {
-                    species_next_key = parse_species_id(value, "species_next_key")?
-                }
-                "species_compatibility_threshold" => {
-                    species_compatibility_threshold =
-                        parse_option_f64(value, "species_compatibility_threshold")?
-                }
-                _ => {}
-            }
-            continue;
-        }
-
-        let parts = split_line(raw_line);
-        match parts.first().map(String::as_str) {
-            Some("genome") => {
-                require_len(&parts, 4, "genome")?;
-                let role = &parts[1];
-                let key = parse_genome_id(&parts[2], "genome key")?;
-                let mut genome = DefaultGenome::new(key);
-                genome.fitness = parse_option_f64(&parts[3], "genome fitness")?;
-                insert_genome(role, genome, &mut population, &mut best_genome)?;
-            }
-            Some("node") => {
-                if parts.len() != 11 && parts.len() != 16 {
-                    return Err(CheckpointError::Invalid(format!(
-                        "node must have 11 or 16 fields, got {}",
-                        parts.len()
-                    )));
-                }
-                let role = &parts[1];
-                let genome_key = parse_genome_id(&parts[2], "node genome key")?;
-                let extended = parts.len() == 16;
-                let memory_offset = if extended { 13 } else { 8 };
-                let node = DefaultNodeGene {
-                    key: parse_i64(&parts[3], "node key")?,
-                    bias: parse_f64(&parts[4], "node bias")?,
-                    response: parse_f64(&parts[5], "node response")?,
-                    activation: parse_activation(&parts[6], "node activation")?,
-                    aggregation: parse_aggregation(&parts[7], "node aggregation")?,
-                    time_constant: if extended {
-                        parse_f64(&parts[8], "node time_constant")?
-                    } else {
-                        1.0
-                    },
-                    iz_a: if extended {
-                        parse_f64(&parts[9], "node iz_a")?
-                    } else {
-                        0.02
-                    },
-                    iz_b: if extended {
-                        parse_f64(&parts[10], "node iz_b")?
-                    } else {
-                        0.20
-                    },
-                    iz_c: if extended {
-                        parse_f64(&parts[11], "node iz_c")?
-                    } else {
-                        -65.0
-                    },
-                    iz_d: if extended {
-                        parse_f64(&parts[12], "node iz_d")?
-                    } else {
-                        8.0
-                    },
-                    memory_gate_enabled: parse_bool(
-                        &parts[memory_offset],
-                        "node memory_gate_enabled",
-                    )?,
-                    memory_gate_bias: parse_f64(
-                        &parts[memory_offset + 1],
-                        "node memory_gate_bias",
-                    )?,
-                    memory_gate_response: parse_f64(
-                        &parts[memory_offset + 2],
-                        "node memory_gate_response",
-                    )?,
-                };
-                genome_mut(role, genome_key, &mut population, &mut best_genome)?
-                    .nodes
-                    .insert(node.key, node);
-            }
-            Some("connection") => {
-                require_len(&parts, 8, "connection")?;
-                let role = &parts[1];
-                let genome_key = parse_genome_id(&parts[2], "connection genome key")?;
-                let input = parse_i64(&parts[3], "connection input")?;
-                let output = parse_i64(&parts[4], "connection output")?;
-                let connection = DefaultConnectionGene {
-                    key: ConnectionKey::new(input, output),
-                    innovation: parse_option_i64(&parts[5], "connection innovation")?,
-                    weight: parse_f64(&parts[6], "connection weight")?,
-                    enabled: parse_bool(&parts[7], "connection enabled")?,
-                };
-                genome_mut(role, genome_key, &mut population, &mut best_genome)?
-                    .connections
-                    .insert(connection.key, connection);
-            }
-            Some("species") => {
-                require_len(&parts, 8, "species")?;
-                let key = parse_species_id(&parts[1], "species key")?;
-                species_meta.insert(
-                    key,
-                    SpeciesMeta {
-                        created: parse_usize(&parts[2], "species created")?,
-                        last_improved: parse_usize(&parts[3], "species last_improved")?,
-                        representative_key: parse_option_genome_id(
-                            &parts[4],
-                            "species representative",
-                        )?,
-                        fitness: parse_option_f64(&parts[5], "species fitness")?,
-                        adjusted_fitness: parse_option_f64(&parts[6], "species adjusted_fitness")?,
-                        fitness_history: parse_f64_list(&parts[7], "species fitness_history")?,
-                    },
-                );
-            }
-            Some("species_member") => {
-                require_len(&parts, 3, "species_member")?;
-                let species_id = parse_species_id(&parts[1], "species_member species")?;
-                let genome_id = parse_genome_id(&parts[2], "species_member genome")?;
-                species_members
-                    .entry(species_id)
-                    .or_default()
-                    .push(genome_id);
-            }
-            Some("ancestor") => {
-                require_len(&parts, 4, "ancestor")?;
-                ancestors.insert(
-                    parse_genome_id(&parts[1], "ancestor child")?,
-                    (
-                        parse_option_genome_id(&parts[2], "ancestor parent1")?,
-                        parse_option_genome_id(&parts[3], "ancestor parent2")?,
-                    ),
-                );
-            }
-            Some(other) => {
-                return Err(CheckpointError::Invalid(format!(
-                    "unknown checkpoint line type {other}"
-                )))
-            }
-            None => {}
+impl CheckpointDocument {
+    fn from_population(checkpointer: &Checkpointer, population: &Population) -> Self {
+        Self {
+            format_version: CHECKPOINT_FORMAT_VERSION.to_string(),
+            config_path: checkpointer.config_path.clone(),
+            generation: population.generation,
+            skip_first_evaluation: population.skip_first_evaluation,
+            rng_state: population.rng_state(),
+            reproduction: ReproductionDocument::from_state(&population.reproduction),
+            species_set: SpeciesSetDocument::from_species_set(&population.species),
+            population: population
+                .population
+                .values()
+                .map(GenomeDocument::from_genome)
+                .collect(),
+            best_genome: population
+                .best_genome
+                .as_ref()
+                .map(GenomeDocument::from_genome),
         }
     }
 
-    if format_version != "neat_rust_checkpoint_v2" {
-        return Err(CheckpointError::Invalid(format!(
-            "unsupported format_version {format_version:?}"
-        )));
-    }
-    let config_path = config_path.ok_or(CheckpointError::MissingConfigPath)?;
-    let config =
-        Config::from_file(&config_path).map_err(|err| CheckpointError::Config(err.to_string()))?;
-    let species_set = build_species_set(
-        species_meta,
-        species_members,
-        &population,
-        species_next_key,
-        species_compatibility_threshold,
-    )?;
-    let reproduction = ReproductionState {
-        genome_indexer,
-        ancestors,
-        innovation_tracker: InnovationTracker::with_start_number(innovation),
-    };
-
-    Ok(Population::from_checkpoint_parts(
-        config,
-        population,
-        species_set,
-        generation,
-        best_genome,
-        reproduction,
-        skip_first_evaluation,
-        XorShiftRng::from_state(rng_state),
-    ))
-}
-
-fn build_species_set(
-    species_meta: BTreeMap<SpeciesId, SpeciesMeta>,
-    species_members: BTreeMap<SpeciesId, Vec<GenomeId>>,
-    population: &BTreeMap<GenomeId, DefaultGenome>,
-    next_species_key: SpeciesId,
-    compatibility_threshold: Option<f64>,
-) -> Result<SpeciesSet, CheckpointError> {
-    let mut species_map = BTreeMap::new();
-    let mut genome_to_species = BTreeMap::new();
-
-    for (species_id, meta) in species_meta {
-        let mut species = Species::new(species_id, meta.created);
-        species.last_improved = meta.last_improved;
-        species.fitness = meta.fitness;
-        species.adjusted_fitness = meta.adjusted_fitness;
-        species.fitness_history = meta.fitness_history;
-        if let Some(representative_key) = meta.representative_key {
-            species.representative = population.get(&representative_key).cloned();
-        }
-        let mut members = BTreeMap::new();
-        for genome_id in species_members.get(&species_id).into_iter().flatten() {
-            let Some(genome) = population.get(genome_id) else {
-                return Err(CheckpointError::Invalid(format!(
-                    "species {species_id} references missing genome {genome_id}"
-                )));
-            };
-            members.insert(*genome_id, genome.clone());
-            genome_to_species.insert(*genome_id, species_id);
-        }
-        species.members = members;
-        species_map.insert(species_id, species);
+    fn from_json_text(text: &str) -> Result<Self, CheckpointError> {
+        serde_json::from_str(text).map_err(|err| {
+            CheckpointError::Invalid(format!("expected checkpoint JSON document: {err}"))
+        })
     }
 
-    Ok(SpeciesSet::from_parts(
-        species_map,
-        genome_to_species,
-        next_species_key,
-        compatibility_threshold,
-    ))
-}
+    fn into_population(self) -> Result<Population, CheckpointError> {
+        if self.format_version != CHECKPOINT_FORMAT_VERSION {
+            return Err(CheckpointError::Invalid(format!(
+                "unsupported format_version {:?}; expected {CHECKPOINT_FORMAT_VERSION}",
+                self.format_version
+            )));
+        }
 
-fn insert_genome(
-    role: &str,
-    genome: DefaultGenome,
-    population: &mut BTreeMap<GenomeId, DefaultGenome>,
-    best_genome: &mut Option<DefaultGenome>,
-) -> Result<(), CheckpointError> {
-    match role {
-        "population" => {
+        let config_path = self.config_path.ok_or(CheckpointError::MissingConfigPath)?;
+        let config = Config::from_file(&config_path)
+            .map_err(|err| CheckpointError::Config(err.to_string()))?;
+
+        let mut population = BTreeMap::new();
+        for document in self.population {
+            let genome = document.into_genome()?;
             population.insert(genome.key, genome);
-            Ok(())
         }
-        "best" => {
-            *best_genome = Some(genome);
-            Ok(())
-        }
-        other => Err(CheckpointError::Invalid(format!(
-            "unknown genome role {other}"
-        ))),
-    }
-}
+        let best_genome = self
+            .best_genome
+            .map(GenomeDocument::into_genome)
+            .transpose()?;
+        let species_set = self.species_set.into_species_set(&population)?;
+        let reproduction = self.reproduction.into_state();
 
-fn genome_mut<'a>(
-    role: &str,
-    key: GenomeId,
-    population: &'a mut BTreeMap<GenomeId, DefaultGenome>,
-    best_genome: &'a mut Option<DefaultGenome>,
-) -> Result<&'a mut DefaultGenome, CheckpointError> {
-    match role {
-        "population" => population
-            .get_mut(&key)
-            .ok_or_else(|| CheckpointError::Invalid(format!("missing population genome {key}"))),
-        "best" => best_genome
-            .as_mut()
-            .filter(|genome| genome.key == key)
-            .ok_or_else(|| CheckpointError::Invalid(format!("missing best genome {key}"))),
-        other => Err(CheckpointError::Invalid(format!(
-            "unknown genome role {other}"
-        ))),
-    }
-}
-
-fn key_value(out: &mut String, key: &str, value: &str) {
-    out.push_str(key);
-    out.push('=');
-    out.push_str(&escape_field(value));
-    out.push('\n');
-}
-
-fn line(out: &mut String, values: &[String]) {
-    for (idx, value) in values.iter().enumerate() {
-        if idx > 0 {
-            out.push('\t');
-        }
-        out.push_str(&escape_field(value));
-    }
-    out.push('\n');
-}
-
-fn split_line(line: &str) -> Vec<String> {
-    line.split('\t').map(unescape_field).collect()
-}
-
-fn escape_field(value: &str) -> String {
-    let mut out = String::new();
-    for ch in value.chars() {
-        match ch {
-            '\\' => out.push_str("\\\\"),
-            '\t' => out.push_str("\\t"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            other => out.push(other),
-        }
-    }
-    out
-}
-
-fn unescape_field(value: &str) -> String {
-    let mut out = String::new();
-    let mut escaped = false;
-    for ch in value.chars() {
-        if escaped {
-            match ch {
-                't' => out.push('\t'),
-                'n' => out.push('\n'),
-                'r' => out.push('\r'),
-                '\\' => out.push('\\'),
-                other => out.push(other),
-            }
-            escaped = false;
-        } else if ch == '\\' {
-            escaped = true;
-        } else {
-            out.push(ch);
-        }
-    }
-    if escaped {
-        out.push('\\');
-    }
-    out
-}
-
-fn bool_text(value: bool) -> &'static str {
-    if value {
-        "true"
-    } else {
-        "false"
-    }
-}
-
-fn option_f64(value: Option<f64>) -> String {
-    value
-        .filter(|value| value.is_finite())
-        .map(|value| value.to_string())
-        .unwrap_or_else(|| "null".to_string())
-}
-
-fn option_i64(value: Option<i64>) -> String {
-    value
-        .map(|value| value.to_string())
-        .unwrap_or_else(|| "null".to_string())
-}
-
-fn option_genome_id(value: Option<GenomeId>) -> String {
-    value
-        .map(|value| value.to_string())
-        .unwrap_or_else(|| "null".to_string())
-}
-
-fn require_len(parts: &[String], expected: usize, label: &str) -> Result<(), CheckpointError> {
-    if parts.len() == expected {
-        Ok(())
-    } else {
-        Err(CheckpointError::Invalid(format!(
-            "{label} expected {expected} fields, got {}",
-            parts.len()
-        )))
-    }
-}
-
-fn parse_bool(value: &str, label: &str) -> Result<bool, CheckpointError> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "true" => Ok(true),
-        "false" => Ok(false),
-        _ => Err(CheckpointError::Invalid(format!(
-            "{label} must be true or false"
-        ))),
-    }
-}
-
-fn parse_activation(value: &str, label: &str) -> Result<ActivationFunction, CheckpointError> {
-    ActivationFunction::from_name(value).ok_or_else(|| {
-        CheckpointError::Invalid(format!("{label} must be a known activation, got {value:?}"))
-    })
-}
-
-fn parse_aggregation(value: &str, label: &str) -> Result<AggregationFunction, CheckpointError> {
-    AggregationFunction::from_name(value).ok_or_else(|| {
-        CheckpointError::Invalid(format!(
-            "{label} must be a known aggregation, got {value:?}"
+        Ok(Population::from_checkpoint_parts(
+            config,
+            population,
+            species_set,
+            self.generation,
+            best_genome,
+            reproduction,
+            self.skip_first_evaluation,
+            XorShiftRng::from_state(self.rng_state),
         ))
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ReproductionDocument {
+    genome_indexer: i64,
+    innovation: i64,
+    ancestors: Vec<AncestorDocument>,
+}
+
+impl ReproductionDocument {
+    fn from_state(state: &ReproductionState) -> Self {
+        Self {
+            genome_indexer: state.genome_indexer.raw(),
+            innovation: state.innovation_tracker.current_innovation_number(),
+            ancestors: state
+                .ancestors
+                .iter()
+                .map(|(child, parents)| AncestorDocument {
+                    child: child.raw(),
+                    parent1: parents.0.map(GenomeId::raw),
+                    parent2: parents.1.map(GenomeId::raw),
+                })
+                .collect(),
+        }
+    }
+
+    fn into_state(self) -> ReproductionState {
+        let ancestors = self
+            .ancestors
+            .into_iter()
+            .map(|entry| {
+                (
+                    GenomeId::new(entry.child),
+                    (
+                        entry.parent1.map(GenomeId::new),
+                        entry.parent2.map(GenomeId::new),
+                    ),
+                )
+            })
+            .collect();
+        ReproductionState {
+            genome_indexer: GenomeId::new(self.genome_indexer),
+            ancestors,
+            innovation_tracker: InnovationTracker::with_start_number(self.innovation),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AncestorDocument {
+    child: i64,
+    parent1: Option<i64>,
+    parent2: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SpeciesSetDocument {
+    next_species_key: i64,
+    compatibility_threshold: Option<f64>,
+    species: Vec<SpeciesDocument>,
+}
+
+impl SpeciesSetDocument {
+    fn from_species_set(species_set: &SpeciesSet) -> Self {
+        Self {
+            next_species_key: species_set.next_species_key().raw(),
+            compatibility_threshold: finite_option(species_set.compatibility_threshold),
+            species: species_set
+                .species
+                .iter()
+                .map(|(id, species)| SpeciesDocument {
+                    id: id.raw(),
+                    created: species.created,
+                    last_improved: species.last_improved,
+                    representative_key: species
+                        .representative
+                        .as_ref()
+                        .map(|genome| genome.key.raw()),
+                    fitness: finite_option(species.fitness),
+                    adjusted_fitness: finite_option(species.adjusted_fitness),
+                    fitness_history: species
+                        .fitness_history
+                        .iter()
+                        .copied()
+                        .filter(|value| value.is_finite())
+                        .collect(),
+                    members: species.members.keys().map(|key| key.raw()).collect(),
+                })
+                .collect(),
+        }
+    }
+
+    fn into_species_set(
+        self,
+        population: &BTreeMap<GenomeId, DefaultGenome>,
+    ) -> Result<SpeciesSet, CheckpointError> {
+        let mut species_map = BTreeMap::new();
+        let mut genome_to_species = BTreeMap::new();
+
+        for document in self.species {
+            let species_id = SpeciesId::new(document.id);
+            let mut species = Species::new(species_id, document.created);
+            species.last_improved = document.last_improved;
+            species.fitness = finite_option(document.fitness);
+            species.adjusted_fitness = finite_option(document.adjusted_fitness);
+            species.fitness_history = document
+                .fitness_history
+                .into_iter()
+                .filter(|value| value.is_finite())
+                .collect();
+            if let Some(representative_key) = document.representative_key.map(GenomeId::new) {
+                species.representative = population.get(&representative_key).cloned();
+            }
+
+            let mut members = BTreeMap::new();
+            for member_id in document.members.into_iter().map(GenomeId::new) {
+                let Some(genome) = population.get(&member_id) else {
+                    return Err(CheckpointError::Invalid(format!(
+                        "species {species_id} references missing genome {member_id}"
+                    )));
+                };
+                members.insert(member_id, genome.clone());
+                genome_to_species.insert(member_id, species_id);
+            }
+            species.members = members;
+            species_map.insert(species_id, species);
+        }
+
+        Ok(SpeciesSet::from_parts(
+            species_map,
+            genome_to_species,
+            SpeciesId::new(self.next_species_key),
+            finite_option(self.compatibility_threshold),
+        ))
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SpeciesDocument {
+    id: i64,
+    created: usize,
+    last_improved: usize,
+    representative_key: Option<i64>,
+    fitness: Option<f64>,
+    adjusted_fitness: Option<f64>,
+    fitness_history: Vec<f64>,
+    members: Vec<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct GenomeDocument {
+    id: i64,
+    fitness: Option<f64>,
+    nodes: Vec<NodeGeneDocument>,
+    connections: Vec<ConnectionGeneDocument>,
+}
+
+impl GenomeDocument {
+    fn from_genome(genome: &DefaultGenome) -> Self {
+        Self {
+            id: genome.key.raw(),
+            fitness: finite_option(genome.fitness),
+            nodes: genome
+                .nodes
+                .values()
+                .map(NodeGeneDocument::from_gene)
+                .collect(),
+            connections: genome
+                .connections
+                .values()
+                .map(ConnectionGeneDocument::from_gene)
+                .collect(),
+        }
+    }
+
+    fn into_genome(self) -> Result<DefaultGenome, CheckpointError> {
+        let mut genome = DefaultGenome::new(GenomeId::new(self.id));
+        genome.fitness = finite_option(self.fitness);
+        for node in self.nodes {
+            let gene = node.into_gene()?;
+            genome.nodes.insert(gene.key, gene);
+        }
+        for connection in self.connections {
+            let gene = connection.into_gene();
+            genome.connections.insert(gene.key, gene);
+        }
+        Ok(genome)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct NodeGeneDocument {
+    id: i64,
+    bias: f64,
+    response: f64,
+    activation: String,
+    aggregation: String,
+    time_constant: f64,
+    iz_a: f64,
+    iz_b: f64,
+    iz_c: f64,
+    iz_d: f64,
+    memory_gate_enabled: bool,
+    memory_gate_bias: f64,
+    memory_gate_response: f64,
+}
+
+impl NodeGeneDocument {
+    fn from_gene(gene: &DefaultNodeGene) -> Self {
+        Self {
+            id: gene.key,
+            bias: gene.bias,
+            response: gene.response,
+            activation: gene.activation.name().to_string(),
+            aggregation: gene.aggregation.name().to_string(),
+            time_constant: gene.time_constant,
+            iz_a: gene.iz_a,
+            iz_b: gene.iz_b,
+            iz_c: gene.iz_c,
+            iz_d: gene.iz_d,
+            memory_gate_enabled: gene.memory_gate_enabled,
+            memory_gate_bias: gene.memory_gate_bias,
+            memory_gate_response: gene.memory_gate_response,
+        }
+    }
+
+    fn into_gene(self) -> Result<DefaultNodeGene, CheckpointError> {
+        Ok(DefaultNodeGene {
+            key: self.id,
+            bias: self.bias,
+            response: self.response,
+            activation: parse_activation(&self.activation)?,
+            aggregation: parse_aggregation(&self.aggregation)?,
+            time_constant: self.time_constant,
+            iz_a: self.iz_a,
+            iz_b: self.iz_b,
+            iz_c: self.iz_c,
+            iz_d: self.iz_d,
+            memory_gate_enabled: self.memory_gate_enabled,
+            memory_gate_bias: self.memory_gate_bias,
+            memory_gate_response: self.memory_gate_response,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ConnectionGeneDocument {
+    input: i64,
+    output: i64,
+    innovation: Option<i64>,
+    weight: f64,
+    enabled: bool,
+}
+
+impl ConnectionGeneDocument {
+    fn from_gene(gene: &DefaultConnectionGene) -> Self {
+        Self {
+            input: gene.key.input,
+            output: gene.key.output,
+            innovation: gene.innovation,
+            weight: gene.weight,
+            enabled: gene.enabled,
+        }
+    }
+
+    fn into_gene(self) -> DefaultConnectionGene {
+        DefaultConnectionGene {
+            key: ConnectionKey::new(self.input, self.output),
+            innovation: self.innovation,
+            weight: self.weight,
+            enabled: self.enabled,
+        }
+    }
+}
+
+fn parse_activation(value: &str) -> Result<ActivationFunction, CheckpointError> {
+    ActivationFunction::from_name(value).ok_or_else(|| {
+        CheckpointError::Invalid(format!("node activation must be known, got {value:?}"))
     })
 }
 
-fn parse_f64(value: &str, label: &str) -> Result<f64, CheckpointError> {
-    value
-        .parse::<f64>()
-        .map_err(|_| CheckpointError::Invalid(format!("{label} must be a floating point number")))
+fn parse_aggregation(value: &str) -> Result<AggregationFunction, CheckpointError> {
+    AggregationFunction::from_name(value).ok_or_else(|| {
+        CheckpointError::Invalid(format!("node aggregation must be known, got {value:?}"))
+    })
 }
 
-fn parse_option_f64(value: &str, label: &str) -> Result<Option<f64>, CheckpointError> {
-    if value.trim() == "null" {
-        Ok(None)
-    } else {
-        Ok(Some(parse_f64(value, label)?))
-    }
-}
-
-fn parse_i64(value: &str, label: &str) -> Result<i64, CheckpointError> {
-    value
-        .parse::<i64>()
-        .map_err(|_| CheckpointError::Invalid(format!("{label} must be an integer")))
-}
-
-fn parse_option_i64(value: &str, label: &str) -> Result<Option<i64>, CheckpointError> {
-    if value.trim() == "null" {
-        Ok(None)
-    } else {
-        Ok(Some(parse_i64(value, label)?))
-    }
-}
-
-fn parse_genome_id(value: &str, label: &str) -> Result<GenomeId, CheckpointError> {
-    Ok(GenomeId::new(parse_i64(value, label)?))
-}
-
-fn parse_species_id(value: &str, label: &str) -> Result<SpeciesId, CheckpointError> {
-    Ok(SpeciesId::new(parse_i64(value, label)?))
-}
-
-fn parse_option_genome_id(value: &str, label: &str) -> Result<Option<GenomeId>, CheckpointError> {
-    if value.trim() == "null" {
-        Ok(None)
-    } else {
-        Ok(Some(parse_genome_id(value, label)?))
-    }
-}
-
-fn parse_usize(value: &str, label: &str) -> Result<usize, CheckpointError> {
-    value
-        .parse::<usize>()
-        .map_err(|_| CheckpointError::Invalid(format!("{label} must be a non-negative integer")))
-}
-
-fn parse_u64(value: &str, label: &str) -> Result<u64, CheckpointError> {
-    value
-        .parse::<u64>()
-        .map_err(|_| CheckpointError::Invalid(format!("{label} must be a non-negative integer")))
-}
-
-fn parse_f64_list(value: &str, label: &str) -> Result<Vec<f64>, CheckpointError> {
-    if value.trim().is_empty() {
-        return Ok(Vec::new());
-    }
-    value
-        .split(',')
-        .map(|item| parse_f64(item, label))
-        .collect()
+fn finite_option(value: Option<f64>) -> Option<f64> {
+    value.filter(|value| value.is_finite())
 }
 
 #[cfg(test)]
@@ -731,7 +474,7 @@ mod tests {
             .join("..")
             .join("scripts")
             .join("configs")
-            .join("neat_recurrent_memory8.ini");
+            .join("neat_recurrent_memory8.toml");
         let config = Config::from_file(&config_path).expect("config should parse");
         let population = Population::new(config, 7).expect("population should initialize");
         let dir =
@@ -762,6 +505,9 @@ mod tests {
             population.reproduction.genome_indexer
         );
 
+        let text = fs::read_to_string(&path).expect("checkpoint should be readable");
+        assert!(text.contains("\"format_version\": \"neat_rust_checkpoint_v3\""));
+
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -774,8 +520,30 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("temp dir should be created");
         let path = dir.join("missing_config.chk");
-        fs::write(&path, "format_version=neat_rust_checkpoint_v2\n")
-            .expect("checkpoint stub should be written");
+        fs::write(
+            &path,
+            r#"{
+  "format_version": "neat_rust_checkpoint_v3",
+  "config_path": null,
+  "generation": 0,
+  "skip_first_evaluation": false,
+  "rng_state": 1,
+  "reproduction": {
+    "genome_indexer": 1,
+    "innovation": 0,
+    "ancestors": []
+  },
+  "species_set": {
+    "next_species_key": 1,
+    "compatibility_threshold": null,
+    "species": []
+  },
+  "population": [],
+  "best_genome": null
+}
+"#,
+        )
+        .expect("checkpoint stub should be written");
 
         let err = match Checkpointer::restore_checkpoint(&path) {
             Ok(_) => panic!("restore must fail without config_path"),

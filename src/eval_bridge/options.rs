@@ -7,9 +7,9 @@ use serde_json::Value;
 use super::EvalBridgeError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NodeCommand(String);
+pub struct ExternalEvalCommand(String);
 
-impl NodeCommand {
+impl ExternalEvalCommand {
     pub fn new(value: impl Into<String>) -> Self {
         let value = value.into();
         let trimmed = value.trim();
@@ -25,7 +25,7 @@ impl NodeCommand {
     }
 }
 
-impl Default for NodeCommand {
+impl Default for ExternalEvalCommand {
     fn default() -> Self {
         Self::new("node")
     }
@@ -326,7 +326,7 @@ impl Default for BridgeNativeInferenceBackend {
 
 #[derive(Debug, Clone)]
 pub struct EvalBridgeOptions {
-    pub node_bin: NodeCommand,
+    pub worker_command: ExternalEvalCommand,
     pub worker_script: PathBuf,
     pub working_dir: Option<PathBuf>,
     pub genome_path: PathBuf,
@@ -350,7 +350,7 @@ pub struct EvalBridgeOptions {
 impl EvalBridgeOptions {
     pub fn new(worker_script: impl Into<PathBuf>, genome_path: impl Into<PathBuf>) -> Self {
         Self {
-            node_bin: NodeCommand::default(),
+            worker_command: ExternalEvalCommand::default(),
             worker_script: worker_script.into(),
             working_dir: None,
             genome_path: genome_path.into(),

@@ -1,7 +1,10 @@
 use std::collections::BTreeMap;
 use std::fs;
 
-use neat_rust::{DefaultGenome, FitnessCriterion, GenomeId, SpeciesId, StatisticsReporter};
+use neat_rust::{
+    algorithm::{DefaultGenome, GenomeId, SpeciesId, StatisticsReporter},
+    io::FitnessCriterion,
+};
 
 #[test]
 fn statistics_reporter_matches_canonical_species_tables() {

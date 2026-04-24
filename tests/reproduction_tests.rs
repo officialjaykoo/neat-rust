@@ -1,4 +1,4 @@
-use neat_rust::{adjust_spawn_exact, compute_spawn_proportional, ReproductionError};
+use neat_rust::algorithm::{adjust_spawn_exact, compute_spawn_proportional, ReproductionError};
 
 #[test]
 fn proportional_spawn_matches_canonical_allocation() {

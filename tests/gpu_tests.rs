@@ -3,9 +3,13 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use neat_rust::{
-    native_cuda_available, pack_ctrnn_population, ActivationFunction, AggregationFunction, Config,
-    ConnectionKey, DefaultConnectionGene, DefaultGenome, DefaultNodeGene, GPUCTRNNEvaluator,
-    GPUIZNNEvaluator, GenomeId, GpuEvaluatorBackend, GpuEvaluatorError, GpuInputBatch,
+    algorithm::{ConnectionKey, DefaultConnectionGene, DefaultGenome, DefaultNodeGene, GenomeId},
+    io::Config,
+    prelude::{ActivationFunction, AggregationFunction},
+    runtime::{
+        native_cuda_available, pack_ctrnn_population, GPUCTRNNEvaluator, GPUIZNNEvaluator,
+        GpuEvaluatorBackend, GpuEvaluatorError, GpuInputBatch,
+    },
 };
 
 fn repo_path(relative: &str) -> PathBuf {
@@ -13,8 +17,8 @@ fn repo_path(relative: &str) -> PathBuf {
         .strip_prefix("scripts/configs/")
         .unwrap_or(relative);
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
+        .join("..")
+        .join("scripts")
         .join("configs")
         .join(relative)
 }
@@ -24,7 +28,7 @@ fn conn_key(input: i64, output: i64) -> ConnectionKey {
 }
 
 fn memory8_config() -> Config {
-    Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.ini"))
+    Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.toml"))
         .expect("config should parse")
 }
 

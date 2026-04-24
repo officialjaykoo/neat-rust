@@ -1,4 +1,4 @@
-use neat_rust::{aggregate, is_valid_aggregation, sum_aggregation, AggregationFunction};
+use neat_rust::prelude::{aggregate, is_valid_aggregation, sum_aggregation, AggregationFunction};
 
 #[test]
 fn resolves_sum_aggregation() {

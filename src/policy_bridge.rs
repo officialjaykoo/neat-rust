@@ -2,9 +2,9 @@ use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
 
-use json::JsonValue;
+use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::policy_gpu_native;
+use crate::native::policy_gpu;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PolicyBridgeBackend {
@@ -34,51 +34,543 @@ impl PolicyBridgeBackend {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PolicyRuntimeBackend {
+    Cpu,
+    CudaNative,
+}
+
+impl PolicyRuntimeBackend {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Cpu => "cpu",
+            Self::CudaNative => "cuda_native",
+        }
+    }
+}
+
+impl Serialize for PolicyRuntimeBackend {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for PolicyRuntimeBackend {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        match value.trim().to_ascii_lowercase().as_str() {
+            "cpu" | "rust_cpu" => Ok(Self::Cpu),
+            "cuda" | "cuda_native" | "native_cuda" | "rust_cuda" => Ok(Self::CudaNative),
+            other => Err(de::Error::custom(format!(
+                "unsupported runtime backend {other:?}"
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PolicyNetworkType {
+    FeedForward,
+    Recurrent,
+}
+
+impl PolicyNetworkType {
+    pub fn parse(value: &str) -> Result<Self, PolicyBridgeError> {
+        match value.trim().to_ascii_lowercase().replace('-', "_").as_str() {
+            "" | "feedforward" | "feed_forward" | "ff" => Ok(Self::FeedForward),
+            "recurrent" | "rnn" => Ok(Self::Recurrent),
+            other => Err(PolicyBridgeError::InvalidNetworkType(other.to_string())),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::FeedForward => "feedforward",
+            Self::Recurrent => "recurrent",
+        }
+    }
+
+    pub fn is_feedforward(self) -> bool {
+        matches!(self, Self::FeedForward)
+    }
+
+    pub fn is_recurrent(self) -> bool {
+        matches!(self, Self::Recurrent)
+    }
+}
+
+impl Serialize for PolicyNetworkType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for PolicyNetworkType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::parse(&value).map_err(de::Error::custom)
+    }
+}
+
+impl fmt::Display for PolicyNetworkType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PolicyIncomingSource {
+    Input,
+    Node,
+}
+
+impl PolicyIncomingSource {
+    pub fn parse(value: &str) -> Result<Self, PolicyBridgeError> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "input" => Ok(Self::Input),
+            "node" => Ok(Self::Node),
+            other => Err(PolicyBridgeError::Protocol(format!(
+                "unsupported source kind '{other}'"
+            ))),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Input => "input",
+            Self::Node => "node",
+        }
+    }
+}
+
+impl Serialize for PolicyIncomingSource {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for PolicyIncomingSource {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::parse(&value).map_err(de::Error::custom)
+    }
+}
+
+impl fmt::Display for PolicyIncomingSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PolicyActivation {
+    Sigmoid,
+    Tanh,
+    Relu,
+    Identity,
+    Clamped,
+    Gauss,
+    Sin,
+    Abs,
+}
+
+impl PolicyActivation {
+    pub fn parse(value: &str) -> Result<Self, PolicyBridgeError> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "sigmoid" => Ok(Self::Sigmoid),
+            "tanh" => Ok(Self::Tanh),
+            "relu" => Ok(Self::Relu),
+            "identity" | "linear" => Ok(Self::Identity),
+            "clamped" => Ok(Self::Clamped),
+            "gauss" => Ok(Self::Gauss),
+            "sin" => Ok(Self::Sin),
+            "abs" => Ok(Self::Abs),
+            other => Err(PolicyBridgeError::UnsupportedActivation(other.to_string())),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Sigmoid => "sigmoid",
+            Self::Tanh => "tanh",
+            Self::Relu => "relu",
+            Self::Identity => "identity",
+            Self::Clamped => "clamped",
+            Self::Gauss => "gauss",
+            Self::Sin => "sin",
+            Self::Abs => "abs",
+        }
+    }
+
+    pub fn apply(self, value: f64) -> f64 {
+        match self {
+            Self::Sigmoid => sigmoid(value),
+            Self::Tanh => value.tanh(),
+            Self::Relu => value.max(0.0),
+            Self::Identity => value,
+            Self::Clamped => value.clamp(-1.0, 1.0),
+            Self::Gauss => (-(value * value)).exp(),
+            Self::Sin => value.sin(),
+            Self::Abs => value.abs(),
+        }
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn cuda_code(self) -> i32 {
+        match self {
+            Self::Sigmoid => 0,
+            Self::Tanh => 1,
+            Self::Relu => 2,
+            Self::Identity => 3,
+            Self::Clamped => 4,
+            Self::Gauss => 5,
+            Self::Sin => 6,
+            Self::Abs => 7,
+        }
+    }
+}
+
+impl Default for PolicyActivation {
+    fn default() -> Self {
+        Self::Tanh
+    }
+}
+
+impl Serialize for PolicyActivation {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for PolicyActivation {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::parse(&value).map_err(de::Error::custom)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PolicyAggregation {
+    Sum,
+    Mean,
+    Max,
+    Min,
+    Product,
+    MaxAbs,
+}
+
+impl PolicyAggregation {
+    pub fn parse(value: &str) -> Result<Self, PolicyBridgeError> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "sum" => Ok(Self::Sum),
+            "mean" => Ok(Self::Mean),
+            "max" => Ok(Self::Max),
+            "min" => Ok(Self::Min),
+            "product" => Ok(Self::Product),
+            "maxabs" => Ok(Self::MaxAbs),
+            other => Err(PolicyBridgeError::UnsupportedAggregation(other.to_string())),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Sum => "sum",
+            Self::Mean => "mean",
+            Self::Max => "max",
+            Self::Min => "min",
+            Self::Product => "product",
+            Self::MaxAbs => "maxabs",
+        }
+    }
+
+    pub fn apply(self, values: &[f64]) -> f64 {
+        match self {
+            Self::Sum => values.iter().sum(),
+            Self::Mean => {
+                if values.is_empty() {
+                    0.0
+                } else {
+                    values.iter().sum::<f64>() / values.len() as f64
+                }
+            }
+            Self::Max => values.iter().copied().reduce(f64::max).unwrap_or(0.0),
+            Self::Min => values.iter().copied().reduce(f64::min).unwrap_or(0.0),
+            Self::Product => values.iter().product(),
+            Self::MaxAbs => {
+                let Some(first) = values.first().copied() else {
+                    return 0.0;
+                };
+                let mut best = first;
+                for value in values.iter().copied().skip(1) {
+                    if value.abs() > best.abs() {
+                        best = value;
+                    }
+                }
+                best
+            }
+        }
+    }
+}
+
+impl Default for PolicyAggregation {
+    fn default() -> Self {
+        Self::Sum
+    }
+}
+
+impl Serialize for PolicyAggregation {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for PolicyAggregation {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::parse(&value).map_err(de::Error::custom)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PolicyIncomingEdge {
-    pub source_kind: String,
+    pub source_kind: PolicyIncomingSource,
     pub source_index: usize,
     pub weight: f64,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CompiledPolicyNodeEval {
     pub node_id: i64,
-    pub activation: String,
-    pub aggregation: String,
+    #[serde(default)]
+    pub activation: PolicyActivation,
+    #[serde(default)]
+    pub aggregation: PolicyAggregation,
     pub bias: f64,
     pub response: f64,
+    #[serde(default)]
     pub memory_gate_enabled: bool,
+    #[serde(default)]
     pub memory_gate_bias: f64,
+    #[serde(default = "default_memory_gate_response")]
     pub memory_gate_response: f64,
+    #[serde(default)]
     pub incoming: Vec<PolicyIncomingEdge>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CompiledPolicySpec {
-    pub network_type: String,
+    pub network_type: PolicyNetworkType,
     pub input_count: usize,
     pub output_indices: Vec<usize>,
     pub node_evals: Vec<CompiledPolicyNodeEval>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CompiledPolicySnapshot {
     pub node_values: BTreeMap<String, f64>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CompiledPolicyRequest {
     pub inputs: Vec<Vec<f64>>,
+    #[serde(default)]
     pub snapshot: Option<CompiledPolicySnapshot>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CompiledPolicyResult {
     pub outputs: Vec<Vec<f64>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub snapshots: Option<Vec<Option<CompiledPolicySnapshot>>>,
-    pub backend_used: String,
+    pub backend_used: PolicyRuntimeBackend,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PolicyNativeError {
+    UnsupportedPlatform,
+    PtxCompilerNotFound,
+    PtxCompileFailed {
+        compiler: String,
+        stderr: String,
+    },
+    PtxProcessLaunch {
+        compiler: String,
+        message: String,
+    },
+    PtxFileIo {
+        operation: &'static str,
+        path: String,
+        message: String,
+    },
+    PtxContainsNul,
+    PtxEmpty,
+    DriverLibraryUnavailable(&'static str),
+    DriverSymbolMissing(&'static str),
+    DriverUnavailable(&'static str),
+    CudaDriver {
+        operation: &'static str,
+        code: i32,
+    },
+    NoCudaDevice,
+    SharedMemoryExceeded {
+        required: usize,
+        limit: usize,
+    },
+    UnsupportedAggregation {
+        node_id: i64,
+        aggregation: String,
+    },
+    BufferOverflow(&'static str),
+    MissingRecurrentBuffer(&'static str),
+    InputRowSizeMismatch {
+        expected: usize,
+        actual: usize,
+    },
+}
+
+impl From<policy_gpu::NativePolicyGpuError> for PolicyNativeError {
+    fn from(value: policy_gpu::NativePolicyGpuError) -> Self {
+        match value {
+            policy_gpu::NativePolicyGpuError::UnsupportedPlatform => Self::UnsupportedPlatform,
+            policy_gpu::NativePolicyGpuError::PtxCompilerNotFound => Self::PtxCompilerNotFound,
+            policy_gpu::NativePolicyGpuError::PtxCompileFailed { compiler, stderr } => {
+                Self::PtxCompileFailed { compiler, stderr }
+            }
+            policy_gpu::NativePolicyGpuError::PtxProcessLaunch { compiler, message } => {
+                Self::PtxProcessLaunch { compiler, message }
+            }
+            policy_gpu::NativePolicyGpuError::PtxFileIo {
+                operation,
+                path,
+                message,
+            } => Self::PtxFileIo {
+                operation,
+                path,
+                message,
+            },
+            policy_gpu::NativePolicyGpuError::PtxContainsNul => Self::PtxContainsNul,
+            policy_gpu::NativePolicyGpuError::PtxEmpty => Self::PtxEmpty,
+            policy_gpu::NativePolicyGpuError::DriverLibraryUnavailable(name) => {
+                Self::DriverLibraryUnavailable(name)
+            }
+            policy_gpu::NativePolicyGpuError::DriverSymbolMissing(name) => {
+                Self::DriverSymbolMissing(name)
+            }
+            policy_gpu::NativePolicyGpuError::DriverUnavailable(operation) => {
+                Self::DriverUnavailable(operation)
+            }
+            policy_gpu::NativePolicyGpuError::CudaDriver { operation, code } => {
+                Self::CudaDriver { operation, code }
+            }
+            policy_gpu::NativePolicyGpuError::NoCudaDevice => Self::NoCudaDevice,
+            policy_gpu::NativePolicyGpuError::SharedMemoryExceeded { required, limit } => {
+                Self::SharedMemoryExceeded { required, limit }
+            }
+            policy_gpu::NativePolicyGpuError::UnsupportedAggregation {
+                node_id,
+                aggregation,
+            } => Self::UnsupportedAggregation {
+                node_id,
+                aggregation,
+            },
+            policy_gpu::NativePolicyGpuError::BufferOverflow(label) => Self::BufferOverflow(label),
+            policy_gpu::NativePolicyGpuError::MissingRecurrentBuffer(label) => {
+                Self::MissingRecurrentBuffer(label)
+            }
+            policy_gpu::NativePolicyGpuError::InputRowSizeMismatch { expected, actual } => {
+                Self::InputRowSizeMismatch { expected, actual }
+            }
+        }
+    }
+}
+
+impl fmt::Display for PolicyNativeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnsupportedPlatform => {
+                write!(f, "native CUDA policy bridge is unavailable on this platform")
+            }
+            Self::PtxCompilerNotFound => write!(f, "clang++ not found for CUDA PTX compilation"),
+            Self::PtxCompileFailed { compiler, stderr } => {
+                write!(f, "failed to compile CUDA PTX with {compiler}: {stderr}")
+            }
+            Self::PtxProcessLaunch { compiler, message } => {
+                write!(f, "failed to run {compiler}: {message}")
+            }
+            Self::PtxFileIo {
+                operation,
+                path,
+                message,
+            } => write!(f, "failed to {operation} PTX file {path}: {message}"),
+            Self::PtxContainsNul => write!(f, "PTX contains NUL byte"),
+            Self::PtxEmpty => write!(f, "compiled CUDA PTX was empty"),
+            Self::DriverLibraryUnavailable(name) => write!(f, "{name} is unavailable"),
+            Self::DriverSymbolMissing(name) => write!(f, "{name} symbol is unavailable"),
+            Self::DriverUnavailable(operation) => write!(f, "{operation} is unavailable"),
+            Self::CudaDriver { operation, code } => {
+                write!(f, "{operation} failed with CUDA error {code}")
+            }
+            Self::NoCudaDevice => write!(f, "no CUDA device found"),
+            Self::SharedMemoryExceeded { required, limit } => write!(
+                f,
+                "policy CUDA kernel requires {required} bytes shared memory; limit is {limit}"
+            ),
+            Self::UnsupportedAggregation {
+                node_id,
+                aggregation,
+            } => write!(
+                f,
+                "native policy CUDA currently supports only sum aggregation; node {node_id} uses {aggregation}"
+            ),
+            Self::BufferOverflow(label) => write!(f, "{label} size overflow"),
+            Self::MissingRecurrentBuffer(label) => {
+                write!(f, "missing recurrent {label} device buffer")
+            }
+            Self::InputRowSizeMismatch { expected, actual } => write!(
+                f,
+                "policy input row size mismatch: expected {expected}, got {actual}"
+            ),
+        }
+    }
+}
+
+impl Error for PolicyNativeError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PolicyBridgeError {
@@ -94,16 +586,22 @@ pub enum PolicyBridgeError {
     },
     IncomingSourceOutOfRange {
         node_id: i64,
-        source_kind: String,
+        source_kind: PolicyIncomingSource,
         source_index: usize,
     },
     UnsupportedActivation(String),
     UnsupportedAggregation(String),
-    Native(String),
+    Native(PolicyNativeError),
+}
+
+impl From<policy_gpu::NativePolicyGpuError> for PolicyBridgeError {
+    fn from(value: policy_gpu::NativePolicyGpuError) -> Self {
+        Self::Native(value.into())
+    }
 }
 
 pub fn native_policy_cuda_available() -> bool {
-    policy_gpu_native::native_cuda_available()
+    policy_gpu::native_cuda_available()
 }
 
 pub fn evaluate_policy_batch(
@@ -111,64 +609,87 @@ pub fn evaluate_policy_batch(
     request: &CompiledPolicyRequest,
     backend: PolicyBridgeBackend,
 ) -> Result<CompiledPolicyResult, PolicyBridgeError> {
-    spec.validate()?;
-    request.validate_inputs(spec.input_count)?;
-
     match backend {
-        PolicyBridgeBackend::Cpu => evaluate_policy_batch_cpu(spec, request, "cpu"),
-        PolicyBridgeBackend::CudaNative => {
-            policy_gpu_native::evaluate_policy_batch_native(spec, request)
-                .map_err(PolicyBridgeError::Native)
-        }
-        PolicyBridgeBackend::Auto => {
-            if native_policy_cuda_available() {
-                if let Ok(result) = policy_gpu_native::evaluate_policy_batch_native(spec, request) {
-                    return Ok(result);
-                }
+        PolicyBridgeBackend::Cpu => CpuPolicyEvaluator.evaluate(spec, request),
+        PolicyBridgeBackend::CudaNative => CudaNativePolicyEvaluator.evaluate(spec, request),
+        PolicyBridgeBackend::Auto => AutoPolicyEvaluator.evaluate(spec, request),
+    }
+}
+
+pub trait PolicyBatchEvaluator {
+    fn evaluate(
+        &self,
+        spec: &CompiledPolicySpec,
+        request: &CompiledPolicyRequest,
+    ) -> Result<CompiledPolicyResult, PolicyBridgeError>;
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CpuPolicyEvaluator;
+
+impl PolicyBatchEvaluator for CpuPolicyEvaluator {
+    fn evaluate(
+        &self,
+        spec: &CompiledPolicySpec,
+        request: &CompiledPolicyRequest,
+    ) -> Result<CompiledPolicyResult, PolicyBridgeError> {
+        spec.validate()?;
+        request.validate_inputs(spec.input_count)?;
+        evaluate_policy_batch_cpu(spec, request, PolicyRuntimeBackend::Cpu)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CudaNativePolicyEvaluator;
+
+impl PolicyBatchEvaluator for CudaNativePolicyEvaluator {
+    fn evaluate(
+        &self,
+        spec: &CompiledPolicySpec,
+        request: &CompiledPolicyRequest,
+    ) -> Result<CompiledPolicyResult, PolicyBridgeError> {
+        spec.validate()?;
+        request.validate_inputs(spec.input_count)?;
+        policy_gpu::evaluate_policy_batch_native(spec, request).map_err(PolicyBridgeError::from)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AutoPolicyEvaluator;
+
+impl PolicyBatchEvaluator for AutoPolicyEvaluator {
+    fn evaluate(
+        &self,
+        spec: &CompiledPolicySpec,
+        request: &CompiledPolicyRequest,
+    ) -> Result<CompiledPolicyResult, PolicyBridgeError> {
+        spec.validate()?;
+        request.validate_inputs(spec.input_count)?;
+        if native_policy_cuda_available() {
+            if let Ok(result) = policy_gpu::evaluate_policy_batch_native(spec, request) {
+                return Ok(result);
             }
-            evaluate_policy_batch_cpu(spec, request, "cpu")
         }
+        evaluate_policy_batch_cpu(spec, request, PolicyRuntimeBackend::Cpu)
     }
 }
 
 impl CompiledPolicySpec {
-    pub fn from_json(value: &JsonValue) -> Result<Self, PolicyBridgeError> {
-        let network_type = json_string_field(value, "networkType")?;
-        let input_count = json_usize_field(value, "inputCount")?;
-        let output_indices = json_usize_array_field(value, "outputIndices")?;
-        let mut node_evals = Vec::new();
-        let nodes_value = json_field(value, "nodeEvals")?;
-        if !nodes_value.is_array() {
-            return Err(PolicyBridgeError::Protocol(
-                "nodeEvals must be a JSON array".to_string(),
-            ));
-        }
-        for node in nodes_value.members() {
-            node_evals.push(CompiledPolicyNodeEval::from_json(node)?);
-        }
-        Ok(Self {
-            network_type,
-            input_count,
-            output_indices,
-            node_evals,
+    pub fn from_json_text(text: &str) -> Result<Self, PolicyBridgeError> {
+        serde_json::from_str(text).map_err(|err| {
+            PolicyBridgeError::Protocol(format!("invalid compiled policy JSON: {err}"))
         })
     }
 
     pub fn is_feedforward(&self) -> bool {
-        self.network_type.trim().eq_ignore_ascii_case("feedforward")
+        self.network_type.is_feedforward()
     }
 
     pub fn is_recurrent(&self) -> bool {
-        self.network_type.trim().eq_ignore_ascii_case("recurrent")
+        self.network_type.is_recurrent()
     }
 
-    fn validate(&self) -> Result<(), PolicyBridgeError> {
-        if !self.is_feedforward() && !self.is_recurrent() {
-            return Err(PolicyBridgeError::InvalidNetworkType(
-                self.network_type.clone(),
-            ));
-        }
-
+    pub fn validate(&self) -> Result<(), PolicyBridgeError> {
         for &output_index in &self.output_indices {
             if output_index >= self.node_evals.len() {
                 return Err(PolicyBridgeError::OutputIndexOutOfRange {
@@ -179,24 +700,22 @@ impl CompiledPolicySpec {
         }
 
         for node in &self.node_evals {
-            normalize_js_activation(&node.activation)?;
-            normalize_js_aggregation(&node.aggregation)?;
             for edge in &node.incoming {
-                match normalize_source_kind(&edge.source_kind)? {
-                    SourceKind::Input => {
+                match edge.source_kind {
+                    PolicyIncomingSource::Input => {
                         if edge.source_index >= self.input_count {
                             return Err(PolicyBridgeError::IncomingSourceOutOfRange {
                                 node_id: node.node_id,
-                                source_kind: edge.source_kind.clone(),
+                                source_kind: edge.source_kind,
                                 source_index: edge.source_index,
                             });
                         }
                     }
-                    SourceKind::Node => {
+                    PolicyIncomingSource::Node => {
                         if edge.source_index >= self.node_evals.len() {
                             return Err(PolicyBridgeError::IncomingSourceOutOfRange {
                                 node_id: node.node_id,
-                                source_kind: edge.source_kind.clone(),
+                                source_kind: edge.source_kind,
                                 source_index: edge.source_index,
                             });
                         }
@@ -210,33 +729,10 @@ impl CompiledPolicySpec {
 }
 
 impl CompiledPolicyRequest {
-    pub fn from_json(value: &JsonValue) -> Result<Self, PolicyBridgeError> {
-        let inputs_value = json_field(value, "inputs")?;
-        if !inputs_value.is_array() {
-            return Err(PolicyBridgeError::Protocol(
-                "inputs must be a JSON array".to_string(),
-            ));
-        }
-        let mut inputs = Vec::new();
-        for row in inputs_value.members() {
-            if !row.is_array() {
-                return Err(PolicyBridgeError::Protocol(
-                    "input rows must be JSON arrays".to_string(),
-                ));
-            }
-            let mut values = Vec::new();
-            for item in row.members() {
-                values.push(json_number(item, "input value")?);
-            }
-            inputs.push(values);
-        }
-
-        let snapshot = if value.has_key("snapshot") && !value["snapshot"].is_null() {
-            Some(CompiledPolicySnapshot::from_json(&value["snapshot"])?)
-        } else {
-            None
-        };
-        Ok(Self { inputs, snapshot })
+    pub fn from_json_text(text: &str) -> Result<Self, PolicyBridgeError> {
+        serde_json::from_str(text).map_err(|err| {
+            PolicyBridgeError::Protocol(format!("invalid policy request JSON: {err}"))
+        })
     }
 
     fn validate_inputs(&self, expected: usize) -> Result<(), PolicyBridgeError> {
@@ -252,109 +748,10 @@ impl CompiledPolicyRequest {
     }
 }
 
-impl CompiledPolicyNodeEval {
-    pub fn from_json(value: &JsonValue) -> Result<Self, PolicyBridgeError> {
-        let node_id = json_i64_field(value, "nodeId")?;
-        let activation = json_string_field(value, "activation")?;
-        let aggregation = json_string_field(value, "aggregation")?;
-        let bias = json_f64_field(value, "bias")?;
-        let response = json_f64_field(value, "response")?;
-        let memory_gate_enabled = json_bool_field(value, "memoryGateEnabled")?;
-        let memory_gate_bias = json_f64_field(value, "memoryGateBias")?;
-        let memory_gate_response = json_f64_field(value, "memoryGateResponse")?;
-        let incoming_value = json_field(value, "incoming")?;
-        if !incoming_value.is_array() {
-            return Err(PolicyBridgeError::Protocol(
-                "incoming must be a JSON array".to_string(),
-            ));
-        }
-        let mut incoming = Vec::new();
-        for edge in incoming_value.members() {
-            incoming.push(PolicyIncomingEdge::from_json(edge)?);
-        }
-        Ok(Self {
-            node_id,
-            activation,
-            aggregation,
-            bias,
-            response,
-            memory_gate_enabled,
-            memory_gate_bias,
-            memory_gate_response,
-            incoming,
-        })
-    }
-}
-
-impl PolicyIncomingEdge {
-    pub fn from_json(value: &JsonValue) -> Result<Self, PolicyBridgeError> {
-        Ok(Self {
-            source_kind: json_string_field(value, "sourceKind")?,
-            source_index: json_usize_field(value, "sourceIndex")?,
-            weight: json_f64_field(value, "weight")?,
-        })
-    }
-}
-
-impl CompiledPolicySnapshot {
-    pub fn from_json(value: &JsonValue) -> Result<Self, PolicyBridgeError> {
-        let node_values_value = json_field(value, "nodeValues")?;
-        if !node_values_value.is_object() {
-            return Err(PolicyBridgeError::Protocol(
-                "snapshot.nodeValues must be a JSON object".to_string(),
-            ));
-        }
-        let mut node_values = BTreeMap::new();
-        for (key, item) in node_values_value.entries() {
-            node_values.insert(key.to_string(), json_number(item, "snapshot node value")?);
-        }
-        Ok(Self { node_values })
-    }
-
-    pub fn to_json_value(&self) -> JsonValue {
-        let mut node_values = JsonValue::new_object();
-        for (key, value) in &self.node_values {
-            let _ = node_values.insert(key, *value);
-        }
-        let mut out = JsonValue::new_object();
-        out["nodeValues"] = node_values;
-        out
-    }
-}
-
-impl CompiledPolicyResult {
-    pub fn to_json_value(&self) -> JsonValue {
-        let mut outputs = JsonValue::new_array();
-        for row in &self.outputs {
-            let mut row_value = JsonValue::new_array();
-            for item in row {
-                let _ = row_value.push(*item);
-            }
-            let _ = outputs.push(row_value);
-        }
-        let mut out = JsonValue::new_object();
-        out["outputs"] = outputs;
-        if let Some(snapshots) = &self.snapshots {
-            let mut values = JsonValue::new_array();
-            for snapshot in snapshots {
-                let _ = values.push(
-                    snapshot
-                        .as_ref()
-                        .map(CompiledPolicySnapshot::to_json_value)
-                        .unwrap_or(JsonValue::Null),
-                );
-            }
-            out["snapshots"] = values;
-        }
-        out["backendUsed"] = self.backend_used.as_str().into();
-        out
-    }
-}
-
 fn evaluate_policy_batch_cpu(
     spec: &CompiledPolicySpec,
     request: &CompiledPolicyRequest,
-    backend_used: &str,
+    backend_used: PolicyRuntimeBackend,
 ) -> Result<CompiledPolicyResult, PolicyBridgeError> {
     let mut outputs = Vec::with_capacity(request.inputs.len());
     let mut snapshots = if spec.is_recurrent() {
@@ -367,71 +764,67 @@ fn evaluate_policy_batch_cpu(
     for input_row in &request.inputs {
         if spec.is_recurrent() {
             let (row_outputs, next_snapshot) =
-                evaluate_recurrent_cpu(spec, input_row, &base_snapshot)?;
+                evaluate_recurrent_cpu(spec, input_row, &base_snapshot);
             outputs.push(row_outputs);
             if let Some(all) = snapshots.as_mut() {
                 all.push(Some(dense_snapshot_to_json(spec, &next_snapshot)));
             }
         } else {
-            outputs.push(evaluate_feedforward_cpu(spec, input_row)?);
+            outputs.push(evaluate_feedforward_cpu(spec, input_row));
         }
     }
 
     Ok(CompiledPolicyResult {
         outputs,
         snapshots,
-        backend_used: backend_used.to_string(),
+        backend_used,
     })
 }
 
-fn evaluate_feedforward_cpu(
-    spec: &CompiledPolicySpec,
-    input_row: &[f64],
-) -> Result<Vec<f64>, PolicyBridgeError> {
+fn evaluate_feedforward_cpu(spec: &CompiledPolicySpec, input_row: &[f64]) -> Vec<f64> {
     let mut node_values = vec![0.0; spec.node_evals.len()];
     let mut terms = Vec::new();
 
     for (node_index, node) in spec.node_evals.iter().enumerate() {
         terms.clear();
         for edge in &node.incoming {
-            let source_value = match normalize_source_kind(&edge.source_kind)? {
-                SourceKind::Input => input_row[edge.source_index],
-                SourceKind::Node => node_values[edge.source_index],
+            let source_value = match edge.source_kind {
+                PolicyIncomingSource::Input => input_row[edge.source_index],
+                PolicyIncomingSource::Node => node_values[edge.source_index],
             };
             terms.push(source_value * edge.weight);
         }
-        let aggregated = apply_js_aggregation(&node.aggregation, &terms)?;
+        let aggregated = node.aggregation.apply(&terms);
         let pre = node.bias + (node.response * aggregated);
-        node_values[node_index] = apply_js_activation(&node.activation, pre)?;
+        node_values[node_index] = node.activation.apply(pre);
     }
 
-    Ok(spec
-        .output_indices
+    spec.output_indices
         .iter()
         .map(|&index| node_values[index])
-        .collect())
+        .collect()
 }
 
 fn evaluate_recurrent_cpu(
     spec: &CompiledPolicySpec,
     input_row: &[f64],
     base_snapshot: &[f64],
-) -> Result<(Vec<f64>, Vec<f64>), PolicyBridgeError> {
+) -> (Vec<f64>, Vec<f64>) {
     let mut next_values = vec![0.0; spec.node_evals.len()];
     let mut terms = Vec::new();
 
     for (node_index, node) in spec.node_evals.iter().enumerate() {
         terms.clear();
         for edge in &node.incoming {
-            let source_value = match normalize_source_kind(&edge.source_kind)? {
-                SourceKind::Input => input_row[edge.source_index],
-                SourceKind::Node => base_snapshot[edge.source_index],
+            let source_value = match edge.source_kind {
+                PolicyIncomingSource::Input => input_row[edge.source_index],
+                PolicyIncomingSource::Node => base_snapshot[edge.source_index],
             };
             terms.push(source_value * edge.weight);
         }
-        let aggregated = apply_js_aggregation(&node.aggregation, &terms)?;
+        let aggregated = node.aggregation.apply(&terms);
         let candidate_pre = node.bias + (node.response * aggregated);
-        let candidate_value = apply_js_activation(&node.activation, candidate_pre)?;
+        let candidate_value = node.activation.apply(candidate_pre);
         next_values[node_index] = if node.memory_gate_enabled {
             let gate_pre = node.memory_gate_bias + (node.memory_gate_response * aggregated);
             let gate = sigmoid(gate_pre);
@@ -446,7 +839,7 @@ fn evaluate_recurrent_cpu(
         .iter()
         .map(|&index| next_values[index])
         .collect();
-    Ok((outputs, next_values))
+    (outputs, next_values)
 }
 
 fn recurrent_snapshot_to_dense(
@@ -476,162 +869,12 @@ fn dense_snapshot_to_json(spec: &CompiledPolicySpec, values: &[f64]) -> Compiled
     CompiledPolicySnapshot { node_values }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SourceKind {
-    Input,
-    Node,
-}
-
-fn normalize_source_kind(value: &str) -> Result<SourceKind, PolicyBridgeError> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "input" => Ok(SourceKind::Input),
-        "node" => Ok(SourceKind::Node),
-        other => Err(PolicyBridgeError::Protocol(format!(
-            "unsupported source kind '{other}'"
-        ))),
-    }
-}
-
-fn normalize_js_activation(value: &str) -> Result<&str, PolicyBridgeError> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "sigmoid" => Ok("sigmoid"),
-        "tanh" => Ok("tanh"),
-        "relu" => Ok("relu"),
-        "identity" | "linear" => Ok("identity"),
-        "clamped" => Ok("clamped"),
-        "gauss" => Ok("gauss"),
-        "sin" => Ok("sin"),
-        "abs" => Ok("abs"),
-        other => Err(PolicyBridgeError::UnsupportedActivation(other.to_string())),
-    }
-}
-
-fn normalize_js_aggregation(value: &str) -> Result<&str, PolicyBridgeError> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "sum" => Ok("sum"),
-        "mean" => Ok("mean"),
-        "max" => Ok("max"),
-        "min" => Ok("min"),
-        "product" => Ok("product"),
-        "maxabs" => Ok("maxabs"),
-        other => Err(PolicyBridgeError::UnsupportedAggregation(other.to_string())),
-    }
-}
-
-fn apply_js_activation(name: &str, value: f64) -> Result<f64, PolicyBridgeError> {
-    Ok(match normalize_js_activation(name)? {
-        "sigmoid" => sigmoid(value),
-        "tanh" => value.tanh(),
-        "relu" => value.max(0.0),
-        "identity" => value,
-        "clamped" => value.clamp(-1.0, 1.0),
-        "gauss" => (-(value * value)).exp(),
-        "sin" => value.sin(),
-        "abs" => value.abs(),
-        _ => value,
-    })
-}
-
-fn apply_js_aggregation(name: &str, values: &[f64]) -> Result<f64, PolicyBridgeError> {
-    Ok(match normalize_js_aggregation(name)? {
-        "sum" => values.iter().sum(),
-        "mean" => {
-            if values.is_empty() {
-                0.0
-            } else {
-                values.iter().sum::<f64>() / values.len() as f64
-            }
-        }
-        "max" => values.iter().copied().reduce(f64::max).unwrap_or(0.0),
-        "min" => values.iter().copied().reduce(f64::min).unwrap_or(0.0),
-        "product" => values.iter().product(),
-        "maxabs" => {
-            let Some(first) = values.first().copied() else {
-                return Ok(0.0);
-            };
-            let mut best = first;
-            for value in values.iter().copied().skip(1) {
-                if value.abs() > best.abs() {
-                    best = value;
-                }
-            }
-            best
-        }
-        _ => 0.0,
-    })
-}
-
 fn sigmoid(value: f64) -> f64 {
     1.0 / (1.0 + (-value).exp())
 }
 
-fn json_field<'a>(value: &'a JsonValue, key: &str) -> Result<&'a JsonValue, PolicyBridgeError> {
-    if !value.is_object() {
-        return Err(PolicyBridgeError::Protocol(format!(
-            "expected JSON object containing key {key:?}"
-        )));
-    }
-    let field = &value[key];
-    if field.is_null() {
-        Err(PolicyBridgeError::Protocol(format!(
-            "missing required JSON field {key:?}"
-        )))
-    } else {
-        Ok(field)
-    }
-}
-
-fn json_string_field(value: &JsonValue, key: &str) -> Result<String, PolicyBridgeError> {
-    json_field(value, key)?
-        .as_str()
-        .map(str::to_string)
-        .ok_or_else(|| PolicyBridgeError::Protocol(format!("JSON field {key:?} must be a string")))
-}
-
-fn json_bool_field(value: &JsonValue, key: &str) -> Result<bool, PolicyBridgeError> {
-    json_field(value, key)?
-        .as_bool()
-        .ok_or_else(|| PolicyBridgeError::Protocol(format!("JSON field {key:?} must be a bool")))
-}
-
-fn json_number(value: &JsonValue, label: &str) -> Result<f64, PolicyBridgeError> {
-    value
-        .as_f64()
-        .ok_or_else(|| PolicyBridgeError::Protocol(format!("{label} must be numeric")))
-}
-
-fn json_f64_field(value: &JsonValue, key: &str) -> Result<f64, PolicyBridgeError> {
-    json_number(json_field(value, key)?, &format!("JSON field {key:?}"))
-}
-
-fn json_usize_field(value: &JsonValue, key: &str) -> Result<usize, PolicyBridgeError> {
-    json_field(value, key)?
-        .as_usize()
-        .ok_or_else(|| PolicyBridgeError::Protocol(format!("JSON field {key:?} must be a usize")))
-}
-
-fn json_i64_field(value: &JsonValue, key: &str) -> Result<i64, PolicyBridgeError> {
-    json_field(value, key)?
-        .as_i64()
-        .ok_or_else(|| PolicyBridgeError::Protocol(format!("JSON field {key:?} must be an i64")))
-}
-
-fn json_usize_array_field(value: &JsonValue, key: &str) -> Result<Vec<usize>, PolicyBridgeError> {
-    let array = json_field(value, key)?;
-    if !array.is_array() {
-        return Err(PolicyBridgeError::Protocol(format!(
-            "JSON field {key:?} must be an array"
-        )));
-    }
-    let mut out = Vec::new();
-    for item in array.members() {
-        out.push(item.as_usize().ok_or_else(|| {
-            PolicyBridgeError::Protocol(format!(
-                "JSON field {key:?} must contain only usize values"
-            ))
-        })?);
-    }
-    Ok(out)
+fn default_memory_gate_response() -> f64 {
+    1.0
 }
 
 impl fmt::Display for PolicyBridgeError {
@@ -674,7 +917,7 @@ impl fmt::Display for PolicyBridgeError {
                     "unsupported JS aggregation {value:?} for native policy bridge"
                 )
             }
-            Self::Native(message) => write!(f, "{message}"),
+            Self::Native(err) => write!(f, "{err}"),
         }
     }
 }
@@ -687,13 +930,13 @@ mod tests {
 
     fn feedforward_fixture() -> CompiledPolicySpec {
         CompiledPolicySpec {
-            network_type: "feedforward".to_string(),
+            network_type: PolicyNetworkType::FeedForward,
             input_count: 2,
             output_indices: vec![0],
             node_evals: vec![CompiledPolicyNodeEval {
                 node_id: 0,
-                activation: "identity".to_string(),
-                aggregation: "sum".to_string(),
+                activation: PolicyActivation::Identity,
+                aggregation: PolicyAggregation::Sum,
                 bias: 0.5,
                 response: 1.0,
                 memory_gate_enabled: false,
@@ -701,12 +944,12 @@ mod tests {
                 memory_gate_response: 1.0,
                 incoming: vec![
                     PolicyIncomingEdge {
-                        source_kind: "input".to_string(),
+                        source_kind: PolicyIncomingSource::Input,
                         source_index: 0,
                         weight: 2.0,
                     },
                     PolicyIncomingEdge {
-                        source_kind: "input".to_string(),
+                        source_kind: PolicyIncomingSource::Input,
                         source_index: 1,
                         weight: -1.0,
                     },
@@ -727,7 +970,7 @@ mod tests {
         )
         .expect("policy evaluation should succeed");
 
-        assert_eq!(result.backend_used, "cpu");
+        assert_eq!(result.backend_used, PolicyRuntimeBackend::Cpu);
         assert_eq!(result.outputs.len(), 1);
         assert!((result.outputs[0][0] - 5.5).abs() < 1e-12);
         assert!(result.snapshots.is_none());
@@ -736,13 +979,13 @@ mod tests {
     #[test]
     fn evaluates_recurrent_memory_gate_fixture_on_cpu() {
         let spec = CompiledPolicySpec {
-            network_type: "recurrent".to_string(),
+            network_type: PolicyNetworkType::Recurrent,
             input_count: 1,
             output_indices: vec![0],
             node_evals: vec![CompiledPolicyNodeEval {
                 node_id: 0,
-                activation: "identity".to_string(),
-                aggregation: "sum".to_string(),
+                activation: PolicyActivation::Identity,
+                aggregation: PolicyAggregation::Sum,
                 bias: 0.0,
                 response: 1.0,
                 memory_gate_enabled: true,
@@ -750,12 +993,12 @@ mod tests {
                 memory_gate_response: 1.0,
                 incoming: vec![
                     PolicyIncomingEdge {
-                        source_kind: "input".to_string(),
+                        source_kind: PolicyIncomingSource::Input,
                         source_index: 0,
                         weight: 1.0,
                     },
                     PolicyIncomingEdge {
-                        source_kind: "node".to_string(),
+                        source_kind: PolicyIncomingSource::Node,
                         source_index: 0,
                         weight: 1.0,
                     },

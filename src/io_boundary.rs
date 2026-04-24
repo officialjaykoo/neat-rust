@@ -1,17 +1,11 @@
-//! NEAT INI config, genome export, and checkpoint boundary.
+//! NEAT TOML config, genome export, and checkpoint boundary.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-pub use crate::checkpoint::{CheckpointError, Checkpointer};
-pub use crate::config::{
-    ActivationConfig, AggregationConfig, BoolAttributeConfig, CompatibilityExcessCoefficient,
-    Config, ConfigError, ConnectionGeneConfig, FitnessCriterion, FitnessSharingMode,
-    FloatAttributeConfig, FloatInitType, GenomeConfig, InitialConnection, InitialConnectionMode,
-    NeatConfig, ReproductionConfig, SpawnMethod, SpeciesFitnessFunction, SpeciesSetConfig,
-    StagnationConfig, StringAttributeConfig, StructuralMutationSurer, TargetNumSpecies,
-};
-pub use crate::export_json::{export_genome_json, GenomeJsonOptions, NEAT_GENOME_FORMAT};
+use crate::checkpoint::{CheckpointError, Checkpointer};
+use crate::config::{Config, ConfigError};
+use crate::export::{export_genome_json, GenomeJsonOptions};
 
 use crate::evolution::{PopulationCheckpointError, PopulationCheckpointSink};
 use crate::genome::DefaultGenome;

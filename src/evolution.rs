@@ -235,8 +235,8 @@ fn build_parent_pools(
         .iter()
         .map(|species| {
             let members = sorted_members(species, config);
-            let cutoff = ((config.reproduction.survival_threshold * members.len() as f64).ceil()
-                as usize)
+            let cutoff = ((config.reproduction.survival_threshold.value() * members.len() as f64)
+                .ceil() as usize)
                 .max(2)
                 .min(members.len());
             (species.key, members.into_iter().take(cutoff).collect())
@@ -267,8 +267,6 @@ fn population_fitness_criterion_value(criterion: &FitnessCriterion, values: &[f6
     match criterion {
         FitnessCriterion::Min => values.iter().copied().reduce(f64::min).unwrap_or(0.0),
         FitnessCriterion::Mean => mean(values),
-        FitnessCriterion::Max | FitnessCriterion::Other(_) => {
-            values.iter().copied().reduce(f64::max).unwrap_or(0.0)
-        }
+        FitnessCriterion::Max => values.iter().copied().reduce(f64::max).unwrap_or(0.0),
     }
 }

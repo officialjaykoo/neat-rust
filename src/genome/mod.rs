@@ -54,14 +54,13 @@ impl DefaultGenome {
             InitialConnectionMode::FullNoDirect => self.connect_full_nodirect(config, rng),
             InitialConnectionMode::FullDirect => self.connect_full_direct(config, rng),
             InitialConnectionMode::Full => self.connect_full_nodirect(config, rng),
-            InitialConnectionMode::PartialNoDirect => {
-                self.connect_partial_nodirect(config, config.initial_connection.fraction, rng)
-            }
+            InitialConnectionMode::PartialNoDirect => self.connect_partial_nodirect(
+                config,
+                config.initial_connection.fraction.value(),
+                rng,
+            ),
             InitialConnectionMode::PartialDirect | InitialConnectionMode::Partial => {
-                self.connect_partial_direct(config, config.initial_connection.fraction, rng)
-            }
-            InitialConnectionMode::Unsupported(value) => {
-                Err(GenomeError::UnsupportedInitialConnection(value.clone()))
+                self.connect_partial_direct(config, config.initial_connection.fraction.value(), rng)
             }
         }
     }
@@ -101,20 +100,17 @@ impl DefaultGenome {
             InitialConnectionMode::PartialNoDirect => self
                 .connect_partial_nodirect_with_innovation(
                     config,
-                    config.initial_connection.fraction,
+                    config.initial_connection.fraction.value(),
                     tracker,
                     rng,
                 ),
             InitialConnectionMode::PartialDirect | InitialConnectionMode::Partial => self
                 .connect_partial_direct_with_innovation(
                     config,
-                    config.initial_connection.fraction,
+                    config.initial_connection.fraction.value(),
                     tracker,
                     rng,
                 ),
-            InitialConnectionMode::Unsupported(value) => {
-                Err(GenomeError::UnsupportedInitialConnection(value.clone()))
-            }
         }
     }
 
@@ -231,41 +227,36 @@ impl DefaultGenome {
         config: &GenomeConfig,
         rng: &mut impl RandomSource,
     ) -> Result<(), GenomeError> {
+        let node_add_prob = config.node_add_prob.value();
+        let node_delete_prob = config.node_delete_prob.value();
+        let conn_add_prob = config.conn_add_prob.value();
+        let conn_delete_prob = config.conn_delete_prob.value();
         if config.single_structural_mutation {
-            let div = (config.node_add_prob
-                + config.node_delete_prob
-                + config.conn_add_prob
-                + config.conn_delete_prob)
-                .max(1.0);
+            let div =
+                (node_add_prob + node_delete_prob + conn_add_prob + conn_delete_prob).max(1.0);
             let roll = rng.next_f64();
-            if roll < config.node_add_prob / div {
+            if roll < node_add_prob / div {
                 self.mutate_add_node(config, rng)?;
-            } else if roll < (config.node_add_prob + config.node_delete_prob) / div {
+            } else if roll < (node_add_prob + node_delete_prob) / div {
                 self.mutate_delete_node(config, rng)?;
-            } else if roll
-                < (config.node_add_prob + config.node_delete_prob + config.conn_add_prob) / div
-            {
+            } else if roll < (node_add_prob + node_delete_prob + conn_add_prob) / div {
                 self.mutate_add_connection(config, rng)?;
             } else if roll
-                < (config.node_add_prob
-                    + config.node_delete_prob
-                    + config.conn_add_prob
-                    + config.conn_delete_prob)
-                    / div
+                < (node_add_prob + node_delete_prob + conn_add_prob + conn_delete_prob) / div
             {
                 self.mutate_delete_connection(config, rng);
             }
         } else {
-            if rng.next_f64() < config.node_add_prob {
+            if rng.next_f64() < node_add_prob {
                 self.mutate_add_node(config, rng)?;
             }
-            if rng.next_f64() < config.node_delete_prob {
+            if rng.next_f64() < node_delete_prob {
                 self.mutate_delete_node(config, rng)?;
             }
-            if rng.next_f64() < config.conn_add_prob {
+            if rng.next_f64() < conn_add_prob {
                 self.mutate_add_connection(config, rng)?;
             }
-            if rng.next_f64() < config.conn_delete_prob {
+            if rng.next_f64() < conn_delete_prob {
                 self.mutate_delete_connection(config, rng);
             }
         }
@@ -286,41 +277,36 @@ impl DefaultGenome {
         tracker: &mut InnovationTracker,
         rng: &mut impl RandomSource,
     ) -> Result<(), GenomeError> {
+        let node_add_prob = config.node_add_prob.value();
+        let node_delete_prob = config.node_delete_prob.value();
+        let conn_add_prob = config.conn_add_prob.value();
+        let conn_delete_prob = config.conn_delete_prob.value();
         if config.single_structural_mutation {
-            let div = (config.node_add_prob
-                + config.node_delete_prob
-                + config.conn_add_prob
-                + config.conn_delete_prob)
-                .max(1.0);
+            let div =
+                (node_add_prob + node_delete_prob + conn_add_prob + conn_delete_prob).max(1.0);
             let roll = rng.next_f64();
-            if roll < config.node_add_prob / div {
+            if roll < node_add_prob / div {
                 self.mutate_add_node_with_innovation(config, tracker, rng)?;
-            } else if roll < (config.node_add_prob + config.node_delete_prob) / div {
+            } else if roll < (node_add_prob + node_delete_prob) / div {
                 self.mutate_delete_node(config, rng)?;
-            } else if roll
-                < (config.node_add_prob + config.node_delete_prob + config.conn_add_prob) / div
-            {
+            } else if roll < (node_add_prob + node_delete_prob + conn_add_prob) / div {
                 self.mutate_add_connection_with_innovation(config, tracker, rng)?;
             } else if roll
-                < (config.node_add_prob
-                    + config.node_delete_prob
-                    + config.conn_add_prob
-                    + config.conn_delete_prob)
-                    / div
+                < (node_add_prob + node_delete_prob + conn_add_prob + conn_delete_prob) / div
             {
                 self.mutate_delete_connection(config, rng);
             }
         } else {
-            if rng.next_f64() < config.node_add_prob {
+            if rng.next_f64() < node_add_prob {
                 self.mutate_add_node_with_innovation(config, tracker, rng)?;
             }
-            if rng.next_f64() < config.node_delete_prob {
+            if rng.next_f64() < node_delete_prob {
                 self.mutate_delete_node(config, rng)?;
             }
-            if rng.next_f64() < config.conn_add_prob {
+            if rng.next_f64() < conn_add_prob {
                 self.mutate_add_connection_with_innovation(config, tracker, rng)?;
             }
-            if rng.next_f64() < config.conn_delete_prob {
+            if rng.next_f64() < conn_delete_prob {
                 self.mutate_delete_connection(config, rng);
             }
         }

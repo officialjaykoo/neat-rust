@@ -116,8 +116,10 @@ impl ReproductionState {
 
             for _ in 0..spawn {
                 let (parent1_id, parent1) = plan_entry.choose_parent(rng)?;
-                let (parent2_id, parent2) = if config.reproduction.interspecies_crossover_prob > 0.0
-                    && rng.next_f64() < config.reproduction.interspecies_crossover_prob
+                let interspecies_crossover_prob =
+                    config.reproduction.interspecies_crossover_prob.value();
+                let (parent2_id, parent2) = if interspecies_crossover_prob > 0.0
+                    && rng.next_f64() < interspecies_crossover_prob
                 {
                     match spawn_plan.choose_interspecies_parent(species_key, rng)? {
                         Some(parent) => parent,

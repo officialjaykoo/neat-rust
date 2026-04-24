@@ -1,8 +1,11 @@
 use std::path::PathBuf;
 
 use neat_rust::{
-    CompatibilityExcessCoefficient, Config, ConnectionKey, DefaultConnectionGene, DefaultGenome,
-    DefaultNodeGene, FitnessCriterion, InitialConnection, RandomSource, XorShiftRng,
+    algorithm::{
+        ConnectionKey, DefaultConnectionGene, DefaultGenome, DefaultNodeGene, RandomSource,
+        XorShiftRng,
+    },
+    io::{CompatibilityExcessCoefficient, Config, FitnessCriterion, InitialConnection},
 };
 
 #[derive(Debug, Clone)]
@@ -33,8 +36,8 @@ fn repo_path(relative: &str) -> PathBuf {
         .strip_prefix("scripts/configs/")
         .unwrap_or(relative);
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
+        .join("..")
+        .join("scripts")
         .join("configs")
         .join(relative)
 }
@@ -45,7 +48,7 @@ fn key(input: i64, output: i64) -> ConnectionKey {
 
 #[test]
 fn creates_full_direct_memory8_recurrent_genome() {
-    let config = Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.ini"))
+    let config = Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.toml"))
         .expect("config should parse");
     let mut rng = XorShiftRng::seed_from_u64(1);
     let mut genome = DefaultGenome::new(0);
@@ -63,7 +66,7 @@ fn creates_full_direct_memory8_recurrent_genome() {
 
 #[test]
 fn creates_partial_direct_feedforward_genome() {
-    let mut config = Config::from_file(repo_path("scripts/configs/neat_feedforward_memory8.ini"))
+    let mut config = Config::from_file(repo_path("scripts/configs/neat_feedforward_memory8.toml"))
         .expect("config should parse");
     config.genome.initial_connection = InitialConnection::partial_direct(0.5);
     let mut rng = XorShiftRng::seed_from_u64(2);
@@ -83,7 +86,7 @@ fn creates_partial_direct_feedforward_genome() {
 
 #[test]
 fn mutate_add_node_keeps_split_connection_neutral() {
-    let config = Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.ini"))
+    let config = Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.toml"))
         .expect("config should parse");
     let mut genome = DefaultGenome::new(1);
     genome.nodes.insert(0, DefaultNodeGene::new(0));
@@ -109,7 +112,7 @@ fn mutate_add_node_keeps_split_connection_neutral() {
 
 #[test]
 fn prune_dangling_nodes_removes_hidden_nodes_that_cannot_reach_outputs() {
-    let config = Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.ini"))
+    let config = Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.toml"))
         .expect("config should parse");
     let mut genome = DefaultGenome::new(1);
     genome.nodes.insert(0, DefaultNodeGene::new(0));
@@ -129,7 +132,7 @@ fn prune_dangling_nodes_removes_hidden_nodes_that_cannot_reach_outputs() {
 
 #[test]
 fn crossover_honors_min_fitness_direction_for_excess_genes() {
-    let mut config = Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.ini"))
+    let mut config = Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.toml"))
         .expect("config should parse");
     config.neat.fitness_criterion = FitnessCriterion::Min;
     let mut high_fitness_parent = DefaultGenome::new(1);
@@ -165,7 +168,7 @@ fn crossover_honors_min_fitness_direction_for_excess_genes() {
 
 #[test]
 fn distance_uses_innovation_excess_and_enable_penalty() {
-    let mut config = Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.ini"))
+    let mut config = Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.toml"))
         .expect("config should parse");
     config.genome.compatibility_disjoint_coefficient = 1.0;
     config.genome.compatibility_excess_coefficient = CompatibilityExcessCoefficient::Value(2.0);

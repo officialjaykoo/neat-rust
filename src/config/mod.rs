@@ -1,13 +1,18 @@
 use std::error::Error;
 use std::fmt;
 use std::fs;
+use std::ops::{Add, AddAssign, Div};
 use std::path::Path;
 
-mod access;
-mod ini;
+use serde::de::{self, Visitor};
+use serde::Deserialize;
 
-use access::*;
-pub use ini::{parse_ini, IniDocument};
+use crate::activation::ActivationFunction;
+use crate::aggregation::AggregationFunction;
+
+mod toml_config;
+
+use toml_config::TomlConfigDocument;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
@@ -23,17 +28,16 @@ pub enum FitnessCriterion {
     Max,
     Min,
     Mean,
-    Other(String),
 }
 
 impl FitnessCriterion {
-    pub fn from_raw(value: &str) -> Self {
+    pub fn parse(value: &str) -> Option<Self> {
         let normalized = value.trim().to_ascii_lowercase();
         match normalized.as_str() {
-            "max" => Self::Max,
-            "min" => Self::Min,
-            "mean" => Self::Mean,
-            _ => Self::Other(value.trim().to_string()),
+            "max" => Some(Self::Max),
+            "min" => Some(Self::Min),
+            "mean" => Some(Self::Mean),
+            _ => None,
         }
     }
 
@@ -72,7 +76,6 @@ impl fmt::Display for FitnessCriterion {
             Self::Max => write!(f, "max"),
             Self::Min => write!(f, "min"),
             Self::Mean => write!(f, "mean"),
-            Self::Other(value) => write!(f, "{value}"),
         }
     }
 }
@@ -86,28 +89,27 @@ pub enum InitialConnectionMode {
     PartialNoDirect,
     PartialDirect,
     Partial,
-    Unsupported(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct InitialConnection {
     pub mode: InitialConnectionMode,
-    pub fraction: f64,
+    pub fraction: Probability,
 }
 
 impl InitialConnection {
-    pub fn from_raw(value: &str) -> Self {
+    pub fn parse(value: &str) -> Option<Self> {
         let trimmed = value.trim();
         let mut parts = trimmed.split_whitespace();
         let Some(mode_raw) = parts.next() else {
-            return Self::unconnected();
+            return Some(Self::unconnected());
         };
         let fraction = match parts.next() {
             Some(raw) => match raw.parse::<f64>() {
-                Ok(value) => value.clamp(0.0, 1.0),
-                Err(_) => return Self::unsupported(trimmed),
+                Ok(value) => Probability::new(value),
+                Err(_) => return None,
             },
-            None => 1.0,
+            None => Probability::one(),
         };
         let mode = match mode_raw.trim().to_ascii_lowercase().as_str() {
             "unconnected" => InitialConnectionMode::Unconnected,
@@ -117,37 +119,175 @@ impl InitialConnection {
             "partial_nodirect" => InitialConnectionMode::PartialNoDirect,
             "partial_direct" => InitialConnectionMode::PartialDirect,
             "partial" => InitialConnectionMode::Partial,
-            _ => return Self::unsupported(trimmed),
+            _ => return None,
         };
-        Self { mode, fraction }
+        Some(Self { mode, fraction })
     }
 
     pub fn unconnected() -> Self {
         Self {
             mode: InitialConnectionMode::Unconnected,
-            fraction: 1.0,
+            fraction: Probability::one(),
         }
     }
 
     pub fn full_direct() -> Self {
         Self {
             mode: InitialConnectionMode::FullDirect,
-            fraction: 1.0,
+            fraction: Probability::one(),
         }
     }
 
     pub fn partial_direct(fraction: f64) -> Self {
         Self {
             mode: InitialConnectionMode::PartialDirect,
-            fraction: fraction.clamp(0.0, 1.0),
+            fraction: Probability::new(fraction),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct Probability(f64);
+
+impl Probability {
+    pub fn new(value: f64) -> Self {
+        if value.is_finite() {
+            Self(value.clamp(0.0, 1.0))
+        } else {
+            Self::zero()
         }
     }
 
-    pub fn unsupported(value: impl Into<String>) -> Self {
-        Self {
-            mode: InitialConnectionMode::Unsupported(value.into()),
-            fraction: 1.0,
+    pub const fn zero() -> Self {
+        Self(0.0)
+    }
+
+    pub const fn one() -> Self {
+        Self(1.0)
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        value.trim().parse::<f64>().ok().map(Self::new)
+    }
+
+    pub const fn value(self) -> f64 {
+        self.0
+    }
+}
+
+impl Default for Probability {
+    fn default() -> Self {
+        Self::zero()
+    }
+}
+
+impl fmt::Display for Probability {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for Probability {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct ProbabilityVisitor;
+
+        impl Visitor<'_> for ProbabilityVisitor {
+            type Value = Probability;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a finite probability number")
+            }
+
+            fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                if value.is_finite() {
+                    Ok(Probability::new(value))
+                } else {
+                    Err(E::custom("probability must be finite"))
+                }
+            }
+
+            fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(Probability::new(value as f64))
+            }
+
+            fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(Probability::new(value as f64))
+            }
         }
+
+        deserializer.deserialize_any(ProbabilityVisitor)
+    }
+}
+
+impl From<Probability> for f64 {
+    fn from(value: Probability) -> Self {
+        value.0
+    }
+}
+
+impl Add for Probability {
+    type Output = f64;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        self.0 + rhs.0
+    }
+}
+
+impl Add<Probability> for f64 {
+    type Output = f64;
+
+    fn add(self, rhs: Probability) -> Self::Output {
+        self + rhs.0
+    }
+}
+
+impl AddAssign<Probability> for f64 {
+    fn add_assign(&mut self, rhs: Probability) {
+        *self += rhs.0;
+    }
+}
+
+impl Div<f64> for Probability {
+    type Output = f64;
+
+    fn div(self, rhs: f64) -> Self::Output {
+        self.0 / rhs
+    }
+}
+
+impl PartialEq<f64> for Probability {
+    fn eq(&self, other: &f64) -> bool {
+        self.0 == *other
+    }
+}
+
+impl PartialOrd<f64> for Probability {
+    fn partial_cmp(&self, other: &f64) -> Option<std::cmp::Ordering> {
+        self.0.partial_cmp(other)
+    }
+}
+
+impl PartialEq<Probability> for f64 {
+    fn eq(&self, other: &Probability) -> bool {
+        *self == other.0
+    }
+}
+
+impl PartialOrd<Probability> for f64 {
+    fn partial_cmp(&self, other: &Probability) -> Option<std::cmp::Ordering> {
+        self.partial_cmp(&other.0)
     }
 }
 
@@ -163,7 +303,6 @@ impl fmt::Display for InitialConnection {
             }
             InitialConnectionMode::PartialDirect => write!(f, "partial_direct {}", self.fraction),
             InitialConnectionMode::Partial => write!(f, "partial {}", self.fraction),
-            InitialConnectionMode::Unsupported(value) => write!(f, "{value}"),
         }
     }
 }
@@ -173,16 +312,15 @@ pub enum StructuralMutationSurer {
     Default,
     Enabled,
     Disabled,
-    Other(String),
 }
 
 impl StructuralMutationSurer {
-    pub fn from_raw(value: &str) -> Self {
+    pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
-            "1" | "yes" | "true" | "on" => Self::Enabled,
-            "0" | "no" | "false" | "off" => Self::Disabled,
-            "default" => Self::Default,
-            _ => Self::Other(value.trim().to_string()),
+            "1" | "yes" | "true" | "on" => Some(Self::Enabled),
+            "0" | "no" | "false" | "off" => Some(Self::Disabled),
+            "default" => Some(Self::Default),
+            _ => None,
         }
     }
 
@@ -190,7 +328,7 @@ impl StructuralMutationSurer {
         match self {
             Self::Default => default,
             Self::Enabled => true,
-            Self::Disabled | Self::Other(_) => false,
+            Self::Disabled => false,
         }
     }
 }
@@ -201,7 +339,6 @@ impl fmt::Display for StructuralMutationSurer {
             Self::Default => write!(f, "default"),
             Self::Enabled => write!(f, "true"),
             Self::Disabled => write!(f, "false"),
-            Self::Other(value) => write!(f, "{value}"),
         }
     }
 }
@@ -210,18 +347,17 @@ impl fmt::Display for StructuralMutationSurer {
 pub enum CompatibilityExcessCoefficient {
     Auto,
     Value(f64),
-    Other(String),
 }
 
 impl CompatibilityExcessCoefficient {
-    pub fn from_raw(value: &str) -> Self {
+    pub fn parse(value: &str) -> Option<Self> {
         let trimmed = value.trim();
         if trimmed.eq_ignore_ascii_case("auto") {
-            Self::Auto
+            Some(Self::Auto)
         } else if let Ok(value) = trimmed.parse::<f64>() {
-            Self::Value(value)
+            Some(Self::Value(value))
         } else {
-            Self::Other(trimmed.to_string())
+            None
         }
     }
 
@@ -229,7 +365,6 @@ impl CompatibilityExcessCoefficient {
         match self {
             Self::Auto => default,
             Self::Value(value) => *value,
-            Self::Other(_) => default,
         }
     }
 }
@@ -239,7 +374,6 @@ impl fmt::Display for CompatibilityExcessCoefficient {
         match self {
             Self::Auto => write!(f, "auto"),
             Self::Value(value) => write!(f, "{value}"),
-            Self::Other(value) => write!(f, "{value}"),
         }
     }
 }
@@ -248,25 +382,24 @@ impl fmt::Display for CompatibilityExcessCoefficient {
 pub enum TargetNumSpecies {
     Disabled,
     Count(usize),
-    Other(String),
 }
 
 impl TargetNumSpecies {
-    pub fn from_raw(value: &str) -> Self {
+    pub fn parse(value: &str) -> Option<Self> {
         let trimmed = value.trim();
         if trimmed.eq_ignore_ascii_case("none") || trimmed.is_empty() {
-            Self::Disabled
+            Some(Self::Disabled)
         } else if let Ok(value) = trimmed.parse::<usize>() {
-            Self::Count(value)
+            Some(Self::Count(value))
         } else {
-            Self::Other(trimmed.to_string())
+            None
         }
     }
 
     pub fn target_count(&self) -> Option<usize> {
         match self {
             Self::Count(value) => Some(*value),
-            Self::Disabled | Self::Other(_) => None,
+            Self::Disabled => None,
         }
     }
 }
@@ -276,7 +409,6 @@ impl fmt::Display for TargetNumSpecies {
         match self {
             Self::Disabled => write!(f, "none"),
             Self::Count(value) => write!(f, "{value}"),
-            Self::Other(value) => write!(f, "{value}"),
         }
     }
 }
@@ -287,17 +419,16 @@ pub enum SpeciesFitnessFunction {
     Max,
     Min,
     Median,
-    Other(String),
 }
 
 impl SpeciesFitnessFunction {
-    pub fn from_raw(value: &str) -> Self {
+    pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
-            "mean" => Self::Mean,
-            "max" => Self::Max,
-            "min" => Self::Min,
-            "median" => Self::Median,
-            _ => Self::Other(value.trim().to_string()),
+            "mean" => Some(Self::Mean),
+            "max" => Some(Self::Max),
+            "min" => Some(Self::Min),
+            "median" => Some(Self::Median),
+            _ => None,
         }
     }
 
@@ -318,7 +449,7 @@ impl SpeciesFitnessFunction {
                     sorted[mid]
                 }
             }
-            Self::Mean | Self::Other(_) => values.iter().sum::<f64>() / values.len() as f64,
+            Self::Mean => values.iter().sum::<f64>() / values.len() as f64,
         }
     }
 }
@@ -330,7 +461,6 @@ impl fmt::Display for SpeciesFitnessFunction {
             Self::Max => write!(f, "max"),
             Self::Min => write!(f, "min"),
             Self::Median => write!(f, "median"),
-            Self::Other(value) => write!(f, "{value}"),
         }
     }
 }
@@ -339,15 +469,14 @@ impl fmt::Display for SpeciesFitnessFunction {
 pub enum FitnessSharingMode {
     Normalized,
     Canonical,
-    Other(String),
 }
 
 impl FitnessSharingMode {
-    pub fn from_raw(value: &str) -> Self {
+    pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
-            "normalized" => Self::Normalized,
-            "canonical" => Self::Canonical,
-            _ => Self::Other(value.trim().to_string()),
+            "normalized" => Some(Self::Normalized),
+            "canonical" => Some(Self::Canonical),
+            _ => None,
         }
     }
 
@@ -361,7 +490,6 @@ impl fmt::Display for FitnessSharingMode {
         match self {
             Self::Normalized => write!(f, "normalized"),
             Self::Canonical => write!(f, "canonical"),
-            Self::Other(value) => write!(f, "{value}"),
         }
     }
 }
@@ -370,15 +498,14 @@ impl fmt::Display for FitnessSharingMode {
 pub enum SpawnMethod {
     Smoothed,
     Proportional,
-    Other(String),
 }
 
 impl SpawnMethod {
-    pub fn from_raw(value: &str) -> Self {
+    pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
-            "smoothed" => Self::Smoothed,
-            "proportional" => Self::Proportional,
-            _ => Self::Other(value.trim().to_string()),
+            "smoothed" => Some(Self::Smoothed),
+            "proportional" => Some(Self::Proportional),
+            _ => None,
         }
     }
 
@@ -392,7 +519,6 @@ impl fmt::Display for SpawnMethod {
         match self {
             Self::Smoothed => write!(f, "smoothed"),
             Self::Proportional => write!(f, "proportional"),
-            Self::Other(value) => write!(f, "{value}"),
         }
     }
 }
@@ -414,14 +540,14 @@ pub struct GenomeConfig {
     pub num_hidden: usize,
     pub feed_forward: bool,
     pub initial_connection: InitialConnection,
-    pub conn_add_prob: f64,
-    pub conn_delete_prob: f64,
-    pub node_add_prob: f64,
-    pub node_delete_prob: f64,
+    pub conn_add_prob: Probability,
+    pub conn_delete_prob: Probability,
+    pub node_add_prob: Probability,
+    pub node_delete_prob: Probability,
     pub single_structural_mutation: bool,
     pub structural_mutation_surer: StructuralMutationSurer,
-    pub activation: StringAttributeConfig,
-    pub aggregation: StringAttributeConfig,
+    pub activation: ActivationConfig,
+    pub aggregation: AggregationConfig,
     pub bias: FloatAttributeConfig,
     pub response: FloatAttributeConfig,
     pub time_constant: FloatAttributeConfig,
@@ -460,39 +586,77 @@ pub struct StagnationConfig {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReproductionConfig {
     pub elitism: usize,
-    pub survival_threshold: f64,
+    pub survival_threshold: Probability,
     pub min_species_size: usize,
     pub fitness_sharing: FitnessSharingMode,
     pub spawn_method: SpawnMethod,
-    pub interspecies_crossover_prob: f64,
+    pub interspecies_crossover_prob: Probability,
+}
+
+pub trait ConfigChoice: Copy + PartialEq + fmt::Display {
+    fn name(self) -> &'static str;
+}
+
+impl ConfigChoice for ActivationFunction {
+    fn name(self) -> &'static str {
+        ActivationFunction::name(self)
+    }
+}
+
+impl ConfigChoice for AggregationFunction {
+    fn name(self) -> &'static str {
+        AggregationFunction::name(self)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChoiceAttributeDefault<T> {
+    Random,
+    Value(T),
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct StringAttributeConfig {
-    pub default: String,
-    pub mutate_rate: f64,
-    pub options: Vec<String>,
+pub struct ChoiceAttributeConfig<T> {
+    pub default: ChoiceAttributeDefault<T>,
+    pub mutate_rate: Probability,
+    pub options: Vec<T>,
 }
 
-pub type ActivationConfig = StringAttributeConfig;
-pub type AggregationConfig = StringAttributeConfig;
+impl<T: ConfigChoice> ChoiceAttributeConfig<T> {
+    pub fn default_label(&self) -> &'static str {
+        match self.default {
+            ChoiceAttributeDefault::Random => "random",
+            ChoiceAttributeDefault::Value(value) => value.name(),
+        }
+    }
+
+    pub fn options_label(&self) -> String {
+        self.options
+            .iter()
+            .map(|value| value.name())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+}
+
+pub type ActivationConfig = ChoiceAttributeConfig<ActivationFunction>;
+pub type AggregationConfig = ChoiceAttributeConfig<AggregationFunction>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FloatInitType {
     Gaussian,
     Uniform,
-    Other(String),
 }
 
 impl FloatInitType {
-    pub fn from_raw(raw: &str) -> Self {
+    pub fn parse(raw: &str) -> Option<Self> {
         let normalized = raw.trim().to_ascii_lowercase();
         if normalized.contains("gauss") || normalized.contains("normal") {
-            Self::Gaussian
+            Some(Self::Gaussian)
         } else if normalized.contains("uniform") {
-            Self::Uniform
+            Some(Self::Uniform)
         } else {
-            Self::Other(normalized)
+            None
         }
     }
 
@@ -500,7 +664,6 @@ impl FloatInitType {
         match self {
             Self::Gaussian => "gaussian",
             Self::Uniform => "uniform",
-            Self::Other(value) => value.as_str(),
         }
     }
 }
@@ -513,16 +676,16 @@ pub struct FloatAttributeConfig {
     pub max_value: f64,
     pub min_value: f64,
     pub mutate_power: f64,
-    pub mutate_rate: f64,
-    pub replace_rate: f64,
+    pub mutate_rate: Probability,
+    pub replace_rate: Probability,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct BoolAttributeConfig {
     pub default: bool,
-    pub mutate_rate: f64,
-    pub rate_to_true_add: f64,
-    pub rate_to_false_add: f64,
+    pub mutate_rate: Probability,
+    pub rate_to_true_add: Probability,
+    pub rate_to_false_add: Probability,
 }
 
 pub type ConnectionGeneConfig = BoolAttributeConfig;
@@ -572,320 +735,15 @@ impl Config {
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self, ConfigError> {
         let text =
             fs::read_to_string(path.as_ref()).map_err(|err| ConfigError::Io(err.to_string()))?;
-        Self::from_str(&text)
+        Self::from_toml_str(&text)
     }
 
     pub fn from_str(text: &str) -> Result<Self, ConfigError> {
-        let ini = parse_ini(text)?;
-        Self::from_ini(&ini)
+        Self::from_toml_str(text)
     }
 
-    pub fn from_ini(ini: &IniDocument) -> Result<Self, ConfigError> {
-        let neat = require_section(ini, "NEAT")?;
-        let genome_section = if ini.contains_key("DefaultGenome") {
-            "DefaultGenome"
-        } else {
-            "IZGenome"
-        };
-        let genome = require_section(ini, genome_section)?;
-        let species_set = require_section(ini, "DefaultSpeciesSet")?;
-        let stagnation = require_section(ini, "DefaultStagnation")?;
-        let reproduction = require_section(ini, "DefaultReproduction")?;
-
-        Ok(Self {
-            neat: NeatConfig {
-                fitness_criterion: FitnessCriterion::from_raw(&get_string(
-                    neat,
-                    "NEAT",
-                    "fitness_criterion",
-                )?),
-                fitness_threshold: get_f64(neat, "NEAT", "fitness_threshold")?,
-                pop_size: get_usize(neat, "NEAT", "pop_size")?,
-                reset_on_extinction: get_bool(neat, "NEAT", "reset_on_extinction")?,
-                no_fitness_termination: get_bool(neat, "NEAT", "no_fitness_termination")?,
-                seed: get_optional_u64(neat, "NEAT", "seed")?,
-            },
-            genome: GenomeConfig {
-                num_inputs: get_usize(genome, genome_section, "num_inputs")?,
-                num_outputs: get_usize(genome, genome_section, "num_outputs")?,
-                num_hidden: get_usize(genome, genome_section, "num_hidden")?,
-                feed_forward: get_bool(genome, genome_section, "feed_forward")?,
-                initial_connection: InitialConnection::from_raw(&get_string(
-                    genome,
-                    genome_section,
-                    "initial_connection",
-                )?),
-                conn_add_prob: get_f64(genome, genome_section, "conn_add_prob")?,
-                conn_delete_prob: get_f64(genome, genome_section, "conn_delete_prob")?,
-                node_add_prob: get_f64(genome, genome_section, "node_add_prob")?,
-                node_delete_prob: get_f64(genome, genome_section, "node_delete_prob")?,
-                single_structural_mutation: get_bool(
-                    genome,
-                    genome_section,
-                    "single_structural_mutation",
-                )?,
-                structural_mutation_surer: StructuralMutationSurer::from_raw(&get_string(
-                    genome,
-                    genome_section,
-                    "structural_mutation_surer",
-                )?),
-                activation: get_optional_string_attribute(
-                    genome,
-                    genome_section,
-                    "activation",
-                    StringAttributeConfig {
-                        default: "identity".to_string(),
-                        mutate_rate: 0.0,
-                        options: vec!["identity".to_string()],
-                    },
-                )?,
-                aggregation: get_optional_string_attribute(
-                    genome,
-                    genome_section,
-                    "aggregation",
-                    StringAttributeConfig {
-                        default: "sum".to_string(),
-                        mutate_rate: 0.0,
-                        options: vec!["sum".to_string()],
-                    },
-                )?,
-                bias: get_float_attribute(genome, genome_section, "bias")?,
-                response: get_optional_float_attribute(
-                    genome,
-                    genome_section,
-                    "response",
-                    FloatAttributeConfig {
-                        init_mean: 1.0,
-                        init_stdev: 0.0,
-                        init_type: FloatInitType::Gaussian,
-                        max_value: 1.0,
-                        min_value: 1.0,
-                        mutate_power: 0.0,
-                        mutate_rate: 0.0,
-                        replace_rate: 0.0,
-                    },
-                )?,
-                time_constant: get_optional_float_attribute(
-                    genome,
-                    genome_section,
-                    "time_constant",
-                    FloatAttributeConfig {
-                        init_mean: 1.0,
-                        init_stdev: 0.0,
-                        init_type: FloatInitType::Gaussian,
-                        max_value: 10.0,
-                        min_value: 0.01,
-                        mutate_power: 0.0,
-                        mutate_rate: 0.0,
-                        replace_rate: 0.0,
-                    },
-                )?,
-                iz_a: get_optional_float_attribute(
-                    genome,
-                    genome_section,
-                    "a",
-                    FloatAttributeConfig {
-                        init_mean: 0.02,
-                        init_stdev: 0.0,
-                        init_type: FloatInitType::Gaussian,
-                        max_value: 0.02,
-                        min_value: 0.02,
-                        mutate_power: 0.0,
-                        mutate_rate: 0.0,
-                        replace_rate: 0.0,
-                    },
-                )?,
-                iz_b: get_optional_float_attribute(
-                    genome,
-                    genome_section,
-                    "b",
-                    FloatAttributeConfig {
-                        init_mean: 0.20,
-                        init_stdev: 0.0,
-                        init_type: FloatInitType::Gaussian,
-                        max_value: 0.20,
-                        min_value: 0.20,
-                        mutate_power: 0.0,
-                        mutate_rate: 0.0,
-                        replace_rate: 0.0,
-                    },
-                )?,
-                iz_c: get_optional_float_attribute(
-                    genome,
-                    genome_section,
-                    "c",
-                    FloatAttributeConfig {
-                        init_mean: -65.0,
-                        init_stdev: 0.0,
-                        init_type: FloatInitType::Gaussian,
-                        max_value: -65.0,
-                        min_value: -65.0,
-                        mutate_power: 0.0,
-                        mutate_rate: 0.0,
-                        replace_rate: 0.0,
-                    },
-                )?,
-                iz_d: get_optional_float_attribute(
-                    genome,
-                    genome_section,
-                    "d",
-                    FloatAttributeConfig {
-                        init_mean: 8.0,
-                        init_stdev: 0.0,
-                        init_type: FloatInitType::Gaussian,
-                        max_value: 8.0,
-                        min_value: 8.0,
-                        mutate_power: 0.0,
-                        mutate_rate: 0.0,
-                        replace_rate: 0.0,
-                    },
-                )?,
-                memory_gate_enabled: get_optional_bool_attribute(
-                    genome,
-                    genome_section,
-                    "memory_gate_enabled",
-                    BoolAttributeConfig {
-                        default: false,
-                        mutate_rate: 0.0,
-                        rate_to_true_add: 0.0,
-                        rate_to_false_add: 0.0,
-                    },
-                )?,
-                memory_gate_bias: get_optional_float_attribute(
-                    genome,
-                    genome_section,
-                    "memory_gate_bias",
-                    FloatAttributeConfig {
-                        init_mean: 0.0,
-                        init_stdev: 0.0,
-                        init_type: FloatInitType::Gaussian,
-                        max_value: 0.0,
-                        min_value: 0.0,
-                        mutate_power: 0.0,
-                        mutate_rate: 0.0,
-                        replace_rate: 0.0,
-                    },
-                )?,
-                memory_gate_response: get_optional_float_attribute(
-                    genome,
-                    genome_section,
-                    "memory_gate_response",
-                    FloatAttributeConfig {
-                        init_mean: 1.0,
-                        init_stdev: 0.0,
-                        init_type: FloatInitType::Gaussian,
-                        max_value: 1.0,
-                        min_value: 1.0,
-                        mutate_power: 0.0,
-                        mutate_rate: 0.0,
-                        replace_rate: 0.0,
-                    },
-                )?,
-                enabled: get_bool_attribute(genome, genome_section, "enabled")?,
-                compatibility_disjoint_coefficient: get_f64(
-                    genome,
-                    genome_section,
-                    "compatibility_disjoint_coefficient",
-                )?,
-                compatibility_excess_coefficient: CompatibilityExcessCoefficient::from_raw(
-                    &get_optional_string_default(
-                        genome,
-                        genome_section,
-                        "compatibility_excess_coefficient",
-                        "auto",
-                    )?,
-                ),
-                compatibility_include_node_genes: get_optional_bool_default(
-                    genome,
-                    genome_section,
-                    "compatibility_include_node_genes",
-                    true,
-                )?,
-                compatibility_enable_penalty: get_optional_f64_default(
-                    genome,
-                    genome_section,
-                    "compatibility_enable_penalty",
-                    1.0,
-                )?,
-                compatibility_weight_coefficient: get_f64(
-                    genome,
-                    genome_section,
-                    "compatibility_weight_coefficient",
-                )?,
-                weight: get_float_attribute(genome, genome_section, "weight")?,
-            },
-            species_set: SpeciesSetConfig {
-                compatibility_threshold: get_f64(
-                    species_set,
-                    "DefaultSpeciesSet",
-                    "compatibility_threshold",
-                )?,
-                target_num_species: TargetNumSpecies::from_raw(&get_optional_string_default(
-                    species_set,
-                    "DefaultSpeciesSet",
-                    "target_num_species",
-                    "none",
-                )?),
-                threshold_adjust_rate: get_optional_f64_default(
-                    species_set,
-                    "DefaultSpeciesSet",
-                    "threshold_adjust_rate",
-                    0.1,
-                )?,
-                threshold_min: get_optional_f64_default(
-                    species_set,
-                    "DefaultSpeciesSet",
-                    "threshold_min",
-                    0.1,
-                )?,
-                threshold_max: get_optional_f64_default(
-                    species_set,
-                    "DefaultSpeciesSet",
-                    "threshold_max",
-                    100.0,
-                )?,
-            },
-            stagnation: StagnationConfig {
-                species_fitness_func: SpeciesFitnessFunction::from_raw(&get_string(
-                    stagnation,
-                    "DefaultStagnation",
-                    "species_fitness_func",
-                )?),
-                max_stagnation: get_usize(stagnation, "DefaultStagnation", "max_stagnation")?,
-                species_elitism: get_usize(stagnation, "DefaultStagnation", "species_elitism")?,
-            },
-            reproduction: ReproductionConfig {
-                elitism: get_usize(reproduction, "DefaultReproduction", "elitism")?,
-                survival_threshold: get_f64(
-                    reproduction,
-                    "DefaultReproduction",
-                    "survival_threshold",
-                )?,
-                min_species_size: get_usize(
-                    reproduction,
-                    "DefaultReproduction",
-                    "min_species_size",
-                )?,
-                fitness_sharing: FitnessSharingMode::from_raw(&get_optional_string_default(
-                    reproduction,
-                    "DefaultReproduction",
-                    "fitness_sharing",
-                    "normalized",
-                )?),
-                spawn_method: SpawnMethod::from_raw(&get_optional_string_default(
-                    reproduction,
-                    "DefaultReproduction",
-                    "spawn_method",
-                    "smoothed",
-                )?),
-                interspecies_crossover_prob: get_optional_f64_default(
-                    reproduction,
-                    "DefaultReproduction",
-                    "interspecies_crossover_prob",
-                    0.0,
-                )?,
-            },
-        })
+    pub fn from_toml_str(text: &str) -> Result<Self, ConfigError> {
+        TomlConfigDocument::from_str(text)?.into_config()
     }
 
     pub fn input_keys(&self) -> Vec<i64> {

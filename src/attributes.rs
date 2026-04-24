@@ -2,7 +2,10 @@ use std::error::Error;
 use std::f64::consts::PI;
 use std::fmt;
 
-use crate::config::{BoolAttributeConfig, FloatAttributeConfig, StringAttributeConfig};
+use crate::config::{
+    BoolAttributeConfig, ChoiceAttributeConfig, ChoiceAttributeDefault, ConfigChoice,
+    FloatAttributeConfig,
+};
 
 pub trait RandomSource {
     fn next_f64(&mut self) -> f64;
@@ -91,9 +94,8 @@ pub enum AttributeError {
         min_value: String,
         max_value: String,
     },
-    UnknownFloatInitType(String),
-    EmptyStringOptions,
-    InvalidStringDefault {
+    EmptyChoiceOptions,
+    InvalidChoiceDefault {
         default: String,
         options: Vec<String>,
     },
@@ -109,13 +111,10 @@ impl fmt::Display for AttributeError {
                 f,
                 "invalid float attribute bounds: min_value={min_value}, max_value={max_value}"
             ),
-            Self::UnknownFloatInitType(init_type) => {
-                write!(f, "unknown float attribute init_type {init_type:?}")
-            }
-            Self::EmptyStringOptions => write!(f, "string attribute options cannot be empty"),
-            Self::InvalidStringDefault { default, options } => write!(
+            Self::EmptyChoiceOptions => write!(f, "choice attribute options cannot be empty"),
+            Self::InvalidChoiceDefault { default, options } => write!(
                 f,
-                "invalid string attribute default {default:?}; expected one of: {}",
+                "invalid choice attribute default {default:?}; expected one of: {}",
                 options.join(" ")
             ),
         }
@@ -160,9 +159,6 @@ impl FloatAttribute {
                     .min(config.init_mean + (2.0 * config.init_stdev));
                 Ok(rng.next_uniform(min_value, max_value))
             }
-            crate::config::FloatInitType::Other(value) => {
-                Err(AttributeError::UnknownFloatInitType(value.clone()))
-            }
         }
     }
 
@@ -173,12 +169,12 @@ impl FloatAttribute {
     ) -> Result<f64, AttributeError> {
         Self::validate(config)?;
         let roll = rng.next_f64();
-        if roll < config.mutate_rate {
+        if roll < config.mutate_rate.value() {
             let delta = rng.next_gaussian(0.0, config.mutate_power);
             return Ok(Self::clamp(value + delta, config));
         }
 
-        if roll < config.mutate_rate + config.replace_rate {
+        if roll < config.mutate_rate.value() + config.replace_rate.value() {
             return Self::init_value(config, rng);
         }
 
@@ -198,11 +194,11 @@ impl BoolAttribute {
         config: &BoolAttributeConfig,
         rng: &mut impl RandomSource,
     ) -> bool {
-        let mut mutate_rate = config.mutate_rate;
+        let mut mutate_rate = config.mutate_rate.value();
         if value {
-            mutate_rate += config.rate_to_false_add;
+            mutate_rate += config.rate_to_false_add.value();
         } else {
-            mutate_rate += config.rate_to_true_add;
+            mutate_rate += config.rate_to_true_add.value();
         }
 
         if rng.next_bool(mutate_rate) {
@@ -213,66 +209,59 @@ impl BoolAttribute {
     }
 }
 
-pub struct StringAttribute;
+pub struct ChoiceAttribute;
 
-impl StringAttribute {
-    pub fn validate(config: &StringAttributeConfig) -> Result<(), AttributeError> {
+impl ChoiceAttribute {
+    pub fn validate<T: ConfigChoice>(
+        config: &ChoiceAttributeConfig<T>,
+    ) -> Result<(), AttributeError> {
         if config.options.is_empty() {
-            return Err(AttributeError::EmptyStringOptions);
+            return Err(AttributeError::EmptyChoiceOptions);
         }
 
-        let default = config.default.trim().to_ascii_lowercase();
-        if default == "none" || default == "random" {
-            return Ok(());
+        if let ChoiceAttributeDefault::Value(default) = config.default {
+            if !config.options.contains(&default) {
+                return Err(AttributeError::InvalidChoiceDefault {
+                    default: default.name().to_string(),
+                    options: config
+                        .options
+                        .iter()
+                        .map(|option| option.name().to_string())
+                        .collect(),
+                });
+            }
         }
+        Ok(())
+    }
 
-        if config
-            .options
-            .iter()
-            .any(|option| option == &config.default)
-        {
-            Ok(())
-        } else {
-            Err(AttributeError::InvalidStringDefault {
-                default: config.default.clone(),
-                options: config.options.clone(),
-            })
+    pub fn init_value<T: ConfigChoice>(
+        config: &ChoiceAttributeConfig<T>,
+        rng: &mut impl RandomSource,
+    ) -> Result<T, AttributeError> {
+        Self::validate(config)?;
+        match config.default {
+            ChoiceAttributeDefault::Random => choose_option(&config.options, rng),
+            ChoiceAttributeDefault::Value(value) => Ok(value),
         }
     }
 
-    pub fn init_value(
-        config: &StringAttributeConfig,
+    pub fn mutate_value<T: ConfigChoice>(
+        value: T,
+        config: &ChoiceAttributeConfig<T>,
         rng: &mut impl RandomSource,
-    ) -> Result<String, AttributeError> {
+    ) -> Result<T, AttributeError> {
         Self::validate(config)?;
-        let default = config.default.trim().to_ascii_lowercase();
-        if default == "none" || default == "random" {
+        if rng.next_bool(config.mutate_rate.value()) {
             return choose_option(&config.options, rng);
         }
 
-        Ok(config.default.clone())
-    }
-
-    pub fn mutate_value(
-        value: &str,
-        config: &StringAttributeConfig,
-        rng: &mut impl RandomSource,
-    ) -> Result<String, AttributeError> {
-        Self::validate(config)?;
-        if rng.next_bool(config.mutate_rate) {
-            return choose_option(&config.options, rng);
-        }
-
-        Ok(value.to_string())
+        Ok(value)
     }
 }
 
-fn choose_option(
-    options: &[String],
-    rng: &mut impl RandomSource,
-) -> Result<String, AttributeError> {
+fn choose_option<T: Copy>(options: &[T], rng: &mut impl RandomSource) -> Result<T, AttributeError> {
     let index = rng
         .next_index(options.len())
-        .ok_or(AttributeError::EmptyStringOptions)?;
-    Ok(options[index].clone())
+        .ok_or(AttributeError::EmptyChoiceOptions)?;
+    Ok(options[index])
 }

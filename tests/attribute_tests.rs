@@ -1,6 +1,10 @@
 use neat_rust::{
-    BoolAttribute, BoolAttributeConfig, FloatAttribute, FloatAttributeConfig, FloatInitType,
-    RandomSource, StringAttribute, StringAttributeConfig,
+    algorithm::{BoolAttribute, ChoiceAttribute, FloatAttribute, RandomSource},
+    io::{
+        BoolAttributeConfig, ChoiceAttributeConfig, ChoiceAttributeDefault, FloatAttributeConfig,
+        FloatInitType, Probability,
+    },
+    prelude::ActivationFunction,
 };
 
 #[derive(Debug, Clone)]
@@ -37,20 +41,23 @@ fn float_config() -> FloatAttributeConfig {
         max_value: 10.0,
         min_value: 0.0,
         mutate_power: 0.25,
-        mutate_rate: 1.0,
-        replace_rate: 0.0,
+        mutate_rate: Probability::one(),
+        replace_rate: Probability::zero(),
     }
 }
 
-fn string_config(default: &str, mutate_rate: f64) -> StringAttributeConfig {
-    StringAttributeConfig {
-        default: default.to_string(),
-        mutate_rate,
+fn activation_config(
+    default: ChoiceAttributeDefault<ActivationFunction>,
+    mutate_rate: f64,
+) -> ChoiceAttributeConfig<ActivationFunction> {
+    ChoiceAttributeConfig {
+        default,
+        mutate_rate: Probability::new(mutate_rate),
         options: vec![
-            "tanh".to_string(),
-            "relu".to_string(),
-            "clamped".to_string(),
-            "identity".to_string(),
+            ActivationFunction::Tanh,
+            ActivationFunction::Relu,
+            ActivationFunction::Clamped,
+            ActivationFunction::Identity,
         ],
     }
 }
@@ -78,9 +85,9 @@ fn mutates_float_with_gaussian_delta_and_clamp() {
 fn mutates_bool_with_directional_rate() {
     let config = BoolAttributeConfig {
         default: false,
-        mutate_rate: 0.0,
-        rate_to_true_add: 1.0,
-        rate_to_false_add: 0.0,
+        mutate_rate: Probability::zero(),
+        rate_to_true_add: Probability::one(),
+        rate_to_false_add: Probability::zero(),
     };
     let mut rng = SequenceRng::new(&[0.25]);
 
@@ -88,15 +95,24 @@ fn mutates_bool_with_directional_rate() {
 }
 
 #[test]
-fn initializes_and_mutates_string_from_options() {
+fn initializes_and_mutates_choice_from_options() {
     let mut init_rng = SequenceRng::new(&[0.75]);
-    let initial = StringAttribute::init_value(&string_config("random", 0.0), &mut init_rng)
-        .expect("random string init should choose an option");
-    assert_eq!(initial, "identity");
+    let initial = ChoiceAttribute::init_value(
+        &activation_config(ChoiceAttributeDefault::Random, 0.0),
+        &mut init_rng,
+    )
+    .expect("random choice init should choose an option");
+    assert_eq!(initial, ActivationFunction::Identity);
 
     let mut mutate_rng = SequenceRng::new(&[0.0, 0.5]);
-    let mutated =
-        StringAttribute::mutate_value("tanh", &string_config("tanh", 0.75), &mut mutate_rng)
-            .expect("string should mutate");
-    assert_eq!(mutated, "clamped");
+    let mutated = ChoiceAttribute::mutate_value(
+        ActivationFunction::Tanh,
+        &activation_config(
+            ChoiceAttributeDefault::Value(ActivationFunction::Tanh),
+            0.75,
+        ),
+        &mut mutate_rng,
+    )
+    .expect("choice should mutate");
+    assert_eq!(mutated, ActivationFunction::Clamped);
 }

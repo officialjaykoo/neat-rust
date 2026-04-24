@@ -1,10 +1,10 @@
 use crate::activation::ActivationFunction;
 use crate::aggregation::AggregationFunction;
-use crate::attributes::{BoolAttribute, FloatAttribute, RandomSource, StringAttribute};
+use crate::attributes::{BoolAttribute, ChoiceAttribute, FloatAttribute, RandomSource};
 use crate::config::GenomeConfig;
 
 use super::key::NodeKey;
-use super::util::{choose_copy, parse_activation, parse_aggregation};
+use super::util::choose_copy;
 use super::GeneError;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -60,9 +60,8 @@ impl DefaultNodeGene {
     ) -> Result<(), GeneError> {
         self.bias = FloatAttribute::init_value(&config.bias, rng)?;
         self.response = FloatAttribute::init_value(&config.response, rng)?;
-        self.activation = parse_activation(StringAttribute::init_value(&config.activation, rng)?)?;
-        self.aggregation =
-            parse_aggregation(StringAttribute::init_value(&config.aggregation, rng)?)?;
+        self.activation = ChoiceAttribute::init_value(&config.activation, rng)?;
+        self.aggregation = ChoiceAttribute::init_value(&config.aggregation, rng)?;
         self.time_constant = FloatAttribute::init_value(&config.time_constant, rng)?;
         self.iz_a = FloatAttribute::init_value(&config.iz_a, rng)?;
         self.iz_b = FloatAttribute::init_value(&config.iz_b, rng)?;
@@ -81,16 +80,9 @@ impl DefaultNodeGene {
     ) -> Result<(), GeneError> {
         self.bias = FloatAttribute::mutate_value(self.bias, &config.bias, rng)?;
         self.response = FloatAttribute::mutate_value(self.response, &config.response, rng)?;
-        self.activation = parse_activation(StringAttribute::mutate_value(
-            self.activation.name(),
-            &config.activation,
-            rng,
-        )?)?;
-        self.aggregation = parse_aggregation(StringAttribute::mutate_value(
-            self.aggregation.name(),
-            &config.aggregation,
-            rng,
-        )?)?;
+        self.activation = ChoiceAttribute::mutate_value(self.activation, &config.activation, rng)?;
+        self.aggregation =
+            ChoiceAttribute::mutate_value(self.aggregation, &config.aggregation, rng)?;
         self.time_constant =
             FloatAttribute::mutate_value(self.time_constant, &config.time_constant, rng)?;
         self.iz_a = FloatAttribute::mutate_value(self.iz_a, &config.iz_a, rng)?;

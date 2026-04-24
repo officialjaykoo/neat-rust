@@ -2,22 +2,27 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use neat_rust::{Config, GenomeId, Population, Reporter, ReporterSet, SpeciesId};
+use neat_rust::{
+    algorithm::{
+        DefaultGenome, GenomeId, Population, Reporter, ReporterSet, Species, SpeciesId, SpeciesSet,
+    },
+    io::Config,
+};
 
 fn repo_path(relative: &str) -> PathBuf {
     let relative = relative
         .strip_prefix("scripts/configs/")
         .unwrap_or(relative);
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
+        .join("..")
+        .join("scripts")
         .join("configs")
         .join(relative)
 }
 
 #[test]
 fn reporter_set_dispatches_core_events_to_all_reporters() {
-    let config = Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.ini"))
+    let config = Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.toml"))
         .expect("config should parse");
     let population = Population::new(config, 24).expect("population should initialize");
     let best = population
@@ -90,9 +95,9 @@ impl Reporter for EventReporter {
     fn post_evaluate(
         &mut self,
         _config: &Config,
-        _population: &std::collections::BTreeMap<GenomeId, neat_rust::DefaultGenome>,
-        _species: &neat_rust::SpeciesSet,
-        _best_genome: &neat_rust::DefaultGenome,
+        _population: &std::collections::BTreeMap<GenomeId, DefaultGenome>,
+        _species: &SpeciesSet,
+        _best_genome: &DefaultGenome,
     ) {
         self.events.borrow_mut().push("post_evaluate".to_string());
     }
@@ -100,8 +105,8 @@ impl Reporter for EventReporter {
     fn post_reproduction(
         &mut self,
         _config: &Config,
-        _population: &std::collections::BTreeMap<GenomeId, neat_rust::DefaultGenome>,
-        _species: &neat_rust::SpeciesSet,
+        _population: &std::collections::BTreeMap<GenomeId, DefaultGenome>,
+        _species: &SpeciesSet,
     ) {
         self.events
             .borrow_mut()
@@ -114,18 +119,13 @@ impl Reporter for EventReporter {
             .push("complete_extinction".to_string());
     }
 
-    fn found_solution(
-        &mut self,
-        _config: &Config,
-        generation: usize,
-        _best: &neat_rust::DefaultGenome,
-    ) {
+    fn found_solution(&mut self, _config: &Config, generation: usize, _best: &DefaultGenome) {
         self.events
             .borrow_mut()
             .push(format!("found_solution:{generation}"));
     }
 
-    fn species_stagnant(&mut self, _species_id: SpeciesId, _species: &neat_rust::Species) {
+    fn species_stagnant(&mut self, _species_id: SpeciesId, _species: &Species) {
         self.events
             .borrow_mut()
             .push("species_stagnant".to_string());

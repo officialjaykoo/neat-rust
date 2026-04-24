@@ -12,7 +12,7 @@ mod summary;
 pub use options::{
     BridgeEarlyStopConfig, BridgeGameCount, BridgeJsonArrayArg, BridgeNativeInferenceBackend,
     BridgeOpponent, BridgeSeat, BridgeStepCount, BridgeTurnPolicy, EvalBridgeOptions, EvalSeed,
-    NodeCommand,
+    ExternalEvalCommand,
 };
 use summary::{last_json_line, EvalWorkerSummary};
 
@@ -74,18 +74,21 @@ impl fmt::Display for EvalBridgeError {
                 write!(f, "{name} must be a JSON array: {message}")
             }
             Self::InvalidTurnPolicy(message) => write!(f, "{message}"),
-            Self::CommandIo(err) => write!(f, "failed to run JS eval worker: {err}"),
+            Self::CommandIo(err) => write!(f, "failed to run external eval worker: {err}"),
             Self::WorkerTimeout {
                 output,
                 timeout_millis,
             } => {
                 let stderr = output.stderr.trim();
                 if stderr.is_empty() {
-                    write!(f, "JS eval worker timed out after {timeout_millis} ms")
+                    write!(
+                        f,
+                        "external eval worker timed out after {timeout_millis} ms"
+                    )
                 } else {
                     write!(
                         f,
-                        "JS eval worker timed out after {timeout_millis} ms: {stderr}"
+                        "external eval worker timed out after {timeout_millis} ms: {stderr}"
                     )
                 }
             }
@@ -94,13 +97,13 @@ impl fmt::Display for EvalBridgeError {
                 if stderr.is_empty() {
                     write!(
                         f,
-                        "JS eval worker failed with status {:?}",
+                        "external eval worker failed with status {:?}",
                         output.status_code
                     )
                 } else {
                     write!(
                         f,
-                        "JS eval worker failed with status {:?}: {stderr}",
+                        "external eval worker failed with status {:?}: {stderr}",
                         output.status_code
                     )
                 }
@@ -111,7 +114,7 @@ impl fmt::Display for EvalBridgeError {
 
 impl Error for EvalBridgeError {}
 
-pub fn default_node_bin() -> String {
+pub fn default_external_eval_command() -> String {
     let Ok(current_dir) = std::env::current_dir() else {
         return "node".to_string();
     };
@@ -149,11 +152,11 @@ pub fn default_node_bin() -> String {
     "node".to_string()
 }
 
-pub fn run_neat_eval_worker(
+pub fn run_external_eval_worker(
     options: &EvalBridgeOptions,
 ) -> Result<EvalBridgeOutput, EvalBridgeError> {
     let args = options.command_args()?;
-    let mut command = Command::new(options.node_bin.as_str());
+    let mut command = Command::new(options.worker_command.as_str());
     command.args(&args);
     if let Some(working_dir) = &options.working_dir {
         command.current_dir(working_dir);
@@ -318,7 +321,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn eval_worker_timeout_returns_distinct_error() {
+    fn external_worker_timeout_returns_distinct_error() {
         let dir =
             std::env::temp_dir().join(format!("neat_rust_eval_bridge_test_{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
@@ -335,12 +338,12 @@ mod tests {
         .expect("worker script should be written");
 
         let mut options = EvalBridgeOptions::new(&worker_path, &genome_path);
-        options.node_bin = NodeCommand::new(default_node_bin());
+        options.worker_command = ExternalEvalCommand::new(default_external_eval_command());
         options.opponent = BridgeOpponent::from_parts(Some("dummy".to_string()), None)
             .expect("dummy opponent should parse");
         options.timeout = Some(Duration::from_millis(50));
 
-        let err = run_neat_eval_worker(&options).expect_err("worker should time out");
+        let err = run_external_eval_worker(&options).expect_err("worker should time out");
         match err {
             EvalBridgeError::WorkerTimeout {
                 output,
@@ -356,7 +359,7 @@ mod tests {
     }
 
     #[test]
-    fn eval_worker_summary_uses_json_parser() {
+    fn external_worker_summary_uses_json_parser() {
         let summary = EvalWorkerSummary::parse(
             r#"{"eval_ok":true,"fitness":1.25,"games":12,"early_stop_reason":"low win rate"}"#,
         )

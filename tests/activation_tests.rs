@@ -1,4 +1,4 @@
-use neat_rust::{
+use neat_rust::prelude::{
     activate, clamped_activation, identity_activation, is_valid_activation, relu_activation,
     tanh_activation, ActivationFunction,
 };

@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use neat_rust::{
-    new_rust_checkpoint_sink, Checkpointer, Config, Population, PopulationError, Reporter,
-    TargetNumSpecies,
+    algorithm::{Population, PopulationError, Reporter},
+    io::{new_rust_checkpoint_sink, Checkpointer, Config, TargetNumSpecies},
 };
 
 fn repo_path(relative: &str) -> PathBuf {
@@ -12,15 +12,15 @@ fn repo_path(relative: &str) -> PathBuf {
         .strip_prefix("scripts/configs/")
         .unwrap_or(relative);
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
+        .join("..")
+        .join("scripts")
         .join("configs")
         .join(relative)
 }
 
 #[test]
 fn runs_one_generation_with_synthetic_fitness() {
-    let config = Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.ini"))
+    let config = Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.toml"))
         .expect("config should parse");
     let pop_size = config.neat.pop_size;
     let mut population = Population::new(config, 24).expect("population should initialize");
@@ -45,7 +45,7 @@ fn runs_one_generation_with_synthetic_fitness() {
 
 #[test]
 fn initial_speciation_adjusts_dynamic_compatibility_threshold() {
-    let mut config = Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.ini"))
+    let mut config = Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.toml"))
         .expect("config should parse");
     config.species_set.compatibility_threshold = 0.5;
     config.species_set.target_num_species = TargetNumSpecies::Count(999);
@@ -60,7 +60,7 @@ fn initial_speciation_adjusts_dynamic_compatibility_threshold() {
 
 #[test]
 fn no_fitness_termination_requires_explicit_generation_limit() {
-    let mut config = Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.ini"))
+    let mut config = Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.toml"))
         .expect("config should parse");
     config.neat.no_fitness_termination = true;
     let mut population = Population::new(config, 24).expect("population should initialize");
@@ -82,7 +82,7 @@ fn no_fitness_termination_requires_explicit_generation_limit() {
 
 #[test]
 fn restored_post_evaluate_checkpoint_skips_duplicate_evaluation() {
-    let config_path = repo_path("scripts/configs/neat_recurrent_memory8.ini");
+    let config_path = repo_path("scripts/configs/neat_recurrent_memory8.toml");
     let config = Config::from_file(&config_path).expect("config should parse");
     let mut population = Population::new(config, 24).expect("population should initialize");
     let dir = std::env::temp_dir().join(format!(
@@ -136,7 +136,7 @@ fn restored_post_evaluate_checkpoint_skips_duplicate_evaluation() {
 
 #[test]
 fn complete_extinction_returns_error_when_reset_is_disabled() {
-    let mut config = Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.ini"))
+    let mut config = Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.toml"))
         .expect("config should parse");
     config.stagnation.max_stagnation = 0;
     config.stagnation.species_elitism = 0;
@@ -160,7 +160,7 @@ fn complete_extinction_returns_error_when_reset_is_disabled() {
 
 #[test]
 fn complete_extinction_resets_population_when_enabled() {
-    let mut config = Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.ini"))
+    let mut config = Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.toml"))
         .expect("config should parse");
     config.stagnation.max_stagnation = 0;
     config.stagnation.species_elitism = 0;

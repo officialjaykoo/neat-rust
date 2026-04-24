@@ -1,10 +1,13 @@
 use std::io::{self, BufRead, Write};
 
-use json::JsonValue;
-use neat_rust::compat::js::{
+use neat_rust::runtime::{
     evaluate_policy_batch, CompiledPolicyRequest, CompiledPolicySpec, PolicyBridgeBackend,
 };
+use serde::Deserialize;
+use serde_json::{json, Value};
 
+#[derive(Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
 enum BridgeRequest {
     Init {
         id: u64,
@@ -12,6 +15,7 @@ enum BridgeRequest {
     },
     Eval {
         id: u64,
+        #[serde(flatten)]
         request: CompiledPolicyRequest,
     },
     Shutdown {
@@ -40,8 +44,9 @@ fn run() -> Result<(), String> {
         let request = parse_request(&line)?;
         match request {
             BridgeRequest::Init { id, compiled: next } => {
+                next.validate().map_err(|err| err.to_string())?;
                 compiled = Some(next);
-                write_response(&mut stdout, id, Ok(JsonValue::new_object()))?;
+                write_response(&mut stdout, id, Ok(json!({})))?;
             }
             BridgeRequest::Eval { id, request } => {
                 let Some(spec) = compiled.as_ref() else {
@@ -53,12 +58,15 @@ fn run() -> Result<(), String> {
                     continue;
                 };
                 match evaluate_policy_batch(spec, &request, backend) {
-                    Ok(result) => write_response(&mut stdout, id, Ok(result.to_json_value()))?,
+                    Ok(result) => {
+                        let value = serde_json::to_value(result).map_err(|err| err.to_string())?;
+                        write_response(&mut stdout, id, Ok(value))?;
+                    }
                     Err(err) => write_response(&mut stdout, id, Err(err.to_string()))?,
                 }
             }
             BridgeRequest::Shutdown { id } => {
-                write_response(&mut stdout, id, Ok(JsonValue::new_object()))?;
+                write_response(&mut stdout, id, Ok(json!({})))?;
                 break;
             }
         }
@@ -68,26 +76,7 @@ fn run() -> Result<(), String> {
 }
 
 fn parse_request(text: &str) -> Result<BridgeRequest, String> {
-    let value = json::parse(text).map_err(|err| format!("invalid request JSON: {err}"))?;
-    let kind = value["kind"]
-        .as_str()
-        .ok_or_else(|| "request.kind must be a string".to_string())?;
-    let id = value["id"]
-        .as_u64()
-        .ok_or_else(|| "request.id must be a u64".to_string())?;
-    match kind {
-        "init" => Ok(BridgeRequest::Init {
-            id,
-            compiled: CompiledPolicySpec::from_json(&value["compiled"])
-                .map_err(|err| err.to_string())?,
-        }),
-        "eval" => Ok(BridgeRequest::Eval {
-            id,
-            request: CompiledPolicyRequest::from_json(&value).map_err(|err| err.to_string())?,
-        }),
-        "shutdown" => Ok(BridgeRequest::Shutdown { id }),
-        other => Err(format!("unsupported bridge request kind {other:?}")),
-    }
+    serde_json::from_str(text).map_err(|err| format!("invalid request JSON: {err}"))
 }
 
 fn parse_backend(args: Vec<String>) -> Result<PolicyBridgeBackend, String> {
@@ -105,25 +94,27 @@ fn parse_backend(args: Vec<String>) -> Result<PolicyBridgeBackend, String> {
 fn write_response(
     stdout: &mut impl Write,
     id: u64,
-    payload: Result<JsonValue, String>,
+    payload: Result<Value, String>,
 ) -> Result<(), String> {
-    let mut response = JsonValue::new_object();
-    response["id"] = id.into();
+    let mut response = json!({ "id": id });
+    let response_object = response
+        .as_object_mut()
+        .ok_or_else(|| "internal response JSON was not an object".to_string())?;
     match payload {
         Ok(value) => {
-            response["ok"] = true.into();
-            if value.is_object() {
-                for (key, item) in value.entries() {
-                    response[key] = item.clone();
+            response_object.insert("ok".to_string(), Value::Bool(true));
+            if let Some(payload_object) = value.as_object() {
+                for (key, item) in payload_object {
+                    response_object.insert(key.clone(), item.clone());
                 }
             }
         }
         Err(error) => {
-            response["ok"] = false.into();
-            response["error"] = error.into();
+            response_object.insert("ok".to_string(), Value::Bool(false));
+            response_object.insert("error".to_string(), Value::String(error));
         }
     }
-    let line = response.dump();
+    let line = serde_json::to_string(&response).map_err(|err| err.to_string())?;
     stdout
         .write_all(line.as_bytes())
         .and_then(|_| stdout.write_all(b"\n"))

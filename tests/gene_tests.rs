@@ -1,8 +1,9 @@
 use std::path::PathBuf;
 
 use neat_rust::{
-    ActivationFunction, AggregationFunction, Config, ConnectionKey, DefaultConnectionGene,
-    DefaultNodeGene, GenomeConfig, RandomSource,
+    algorithm::{ConnectionKey, DefaultConnectionGene, DefaultNodeGene, RandomSource},
+    io::{Config, GenomeConfig},
+    prelude::{ActivationFunction, AggregationFunction},
 };
 
 #[derive(Debug, Clone)]
@@ -36,8 +37,8 @@ fn repo_path(relative: &str) -> PathBuf {
         .strip_prefix("scripts/configs/")
         .unwrap_or(relative);
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
+        .join("..")
+        .join("scripts")
         .join("configs")
         .join(relative)
 }
@@ -47,7 +48,7 @@ fn key(input: i64, output: i64) -> ConnectionKey {
 }
 
 fn memory8_genome_config() -> GenomeConfig {
-    Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.ini"))
+    Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.toml"))
         .expect("memory8 recurrent config should parse")
         .genome
 }

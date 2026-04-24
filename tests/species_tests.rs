@@ -1,22 +1,25 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-use neat_rust::{Config, DefaultGenome, GenomeId, Population, SpeciesId, SpeciesSet, XorShiftRng};
+use neat_rust::{
+    algorithm::{DefaultGenome, GenomeId, Population, SpeciesId, SpeciesSet, XorShiftRng},
+    io::Config,
+};
 
 fn repo_path(relative: &str) -> PathBuf {
     let relative = relative
         .strip_prefix("scripts/configs/")
         .unwrap_or(relative);
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
+        .join("..")
+        .join("scripts")
         .join("configs")
         .join(relative)
 }
 
 #[test]
 fn speciation_has_no_orphaned_mappings() {
-    let config = Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.ini"))
+    let config = Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.toml"))
         .expect("config should parse");
     let population = Population::new(config, 24).expect("population should initialize");
 
@@ -37,7 +40,7 @@ fn speciation_has_no_orphaned_mappings() {
 
 #[test]
 fn identical_genomes_collapse_into_one_species() {
-    let config = Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.ini"))
+    let config = Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.toml"))
         .expect("config should parse");
     let mut rng = XorShiftRng::seed_from_u64(7);
     let mut template = DefaultGenome::new(1);
