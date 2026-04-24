@@ -4,12 +4,12 @@ use crate::activation::ActivationFunction;
 use crate::aggregation::AggregationFunction;
 
 use super::{
-    BoolAttributeConfig, ChoiceAttributeConfig, ChoiceAttributeDefault,
+    AdaptiveMutationConfig, BoolAttributeConfig, ChoiceAttributeConfig, ChoiceAttributeDefault,
     CompatibilityExcessCoefficient, Config, ConfigChoice, ConfigError, FitnessCriterion,
     FitnessSharingMode, FloatAttributeConfig, FloatInitType, GenomeConfig, InitialConnection,
-    InitialConnectionMode, NeatConfig, Probability, ReproductionConfig, SpawnMethod,
-    SpeciesFitnessFunction, SpeciesSetConfig, StagnationConfig, StructuralMutationSurer,
-    TargetNumSpecies,
+    InitialConnectionMode, MutationRateCaps, NeatConfig, Probability, ReproductionConfig,
+    SpawnMethod, SpeciesFitnessFunction, SpeciesSetConfig, StagnationConfig,
+    StructuralMutationSurer, TargetNumSpecies,
 };
 
 #[derive(Debug, Clone, Deserialize)]
@@ -101,6 +101,12 @@ struct RawGenomeConfig {
     memory_gate_bias: Option<RawFloatAttribute>,
     memory_gate_response: Option<RawFloatAttribute>,
     enabled: RawBoolAttribute,
+    connection_gru_enabled: Option<RawBoolAttribute>,
+    connection_memory_weight: Option<RawFloatAttribute>,
+    connection_reset_input_weight: Option<RawFloatAttribute>,
+    connection_reset_memory_weight: Option<RawFloatAttribute>,
+    connection_update_input_weight: Option<RawFloatAttribute>,
+    connection_update_memory_weight: Option<RawFloatAttribute>,
     compatibility_disjoint_coefficient: f64,
     compatibility_excess_coefficient: Option<String>,
     #[serde(default = "default_true")]
@@ -207,6 +213,35 @@ impl RawGenomeConfig {
                 .transpose()?
                 .unwrap_or_else(default_memory_gate_response_attribute),
             enabled: self.enabled.into_config(),
+            connection_gru_enabled: self
+                .connection_gru_enabled
+                .map(RawBoolAttribute::into_config)
+                .unwrap_or_else(default_connection_gru_enabled_attribute),
+            connection_memory_weight: self
+                .connection_memory_weight
+                .map(RawFloatAttribute::into_config)
+                .transpose()?
+                .unwrap_or_else(default_connection_gru_weight_attribute),
+            connection_reset_input_weight: self
+                .connection_reset_input_weight
+                .map(RawFloatAttribute::into_config)
+                .transpose()?
+                .unwrap_or_else(default_connection_gru_weight_attribute),
+            connection_reset_memory_weight: self
+                .connection_reset_memory_weight
+                .map(RawFloatAttribute::into_config)
+                .transpose()?
+                .unwrap_or_else(default_connection_gru_weight_attribute),
+            connection_update_input_weight: self
+                .connection_update_input_weight
+                .map(RawFloatAttribute::into_config)
+                .transpose()?
+                .unwrap_or_else(default_connection_gru_weight_attribute),
+            connection_update_memory_weight: self
+                .connection_update_memory_weight
+                .map(RawFloatAttribute::into_config)
+                .transpose()?
+                .unwrap_or_else(default_connection_gru_weight_attribute),
             compatibility_disjoint_coefficient: self.compatibility_disjoint_coefficient,
             compatibility_excess_coefficient: self
                 .compatibility_excess_coefficient
@@ -429,6 +464,7 @@ struct RawReproductionConfig {
     spawn_method: Option<String>,
     #[serde(default)]
     interspecies_crossover_prob: Probability,
+    adaptive_mutation: Option<RawAdaptiveMutationConfig>,
 }
 
 impl RawReproductionConfig {
@@ -464,7 +500,49 @@ impl RawReproductionConfig {
                 .transpose()?
                 .unwrap_or(SpawnMethod::Smoothed),
             interspecies_crossover_prob: self.interspecies_crossover_prob,
+            adaptive_mutation: self
+                .adaptive_mutation
+                .map(RawAdaptiveMutationConfig::into_config)
+                .unwrap_or_else(AdaptiveMutationConfig::disabled),
         })
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawAdaptiveMutationConfig {
+    #[serde(default)]
+    enabled: bool,
+    #[serde(default)]
+    start_after: usize,
+    #[serde(default)]
+    full_after: usize,
+    #[serde(default = "default_adaptive_mutation_max_multiplier")]
+    max_multiplier: f64,
+    #[serde(default = "default_probability_one")]
+    conn_add_prob_cap: Probability,
+    #[serde(default = "default_probability_one")]
+    conn_delete_prob_cap: Probability,
+    #[serde(default = "default_probability_one")]
+    node_add_prob_cap: Probability,
+    #[serde(default = "default_probability_one")]
+    node_delete_prob_cap: Probability,
+}
+
+impl RawAdaptiveMutationConfig {
+    fn into_config(self) -> AdaptiveMutationConfig {
+        AdaptiveMutationConfig {
+            enabled: self.enabled,
+            start_after: self.start_after,
+            full_after: self.full_after,
+            max_multiplier: self.max_multiplier.max(1.0),
+            caps: MutationRateCaps {
+                conn_add_prob: self.conn_add_prob_cap,
+                conn_delete_prob: self.conn_delete_prob_cap,
+                node_add_prob: self.node_add_prob_cap,
+                node_delete_prob: self.node_delete_prob_cap,
+            },
+        }
     }
 }
 
@@ -560,6 +638,10 @@ fn default_probability_one() -> Probability {
     Probability::one()
 }
 
+fn default_adaptive_mutation_max_multiplier() -> f64 {
+    1.0
+}
+
 fn default_threshold_adjust_rate() -> f64 {
     0.1
 }
@@ -624,4 +706,17 @@ fn default_memory_gate_bias_attribute() -> FloatAttributeConfig {
 
 fn default_memory_gate_response_attribute() -> FloatAttributeConfig {
     default_float_attribute(1.0, 1.0, 1.0)
+}
+
+fn default_connection_gru_enabled_attribute() -> BoolAttributeConfig {
+    BoolAttributeConfig {
+        default: false,
+        mutate_rate: Probability::zero(),
+        rate_to_true_add: Probability::zero(),
+        rate_to_false_add: Probability::zero(),
+    }
+}
+
+fn default_connection_gru_weight_attribute() -> FloatAttributeConfig {
+    default_float_attribute(0.0, 0.0, 0.0)
 }

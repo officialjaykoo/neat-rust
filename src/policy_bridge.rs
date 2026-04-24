@@ -367,6 +367,18 @@ pub struct PolicyIncomingEdge {
     pub source_kind: PolicyIncomingSource,
     pub source_index: usize,
     pub weight: f64,
+    #[serde(default)]
+    pub connection_gru_enabled: bool,
+    #[serde(default)]
+    pub connection_memory_weight: f64,
+    #[serde(default)]
+    pub connection_reset_input_weight: f64,
+    #[serde(default)]
+    pub connection_reset_memory_weight: f64,
+    #[serde(default)]
+    pub connection_update_input_weight: f64,
+    #[serde(default)]
+    pub connection_update_memory_weight: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -398,10 +410,15 @@ pub struct CompiledPolicySpec {
     pub node_evals: Vec<CompiledPolicyNodeEval>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CompiledPolicySnapshot {
+    #[serde(default)]
     pub node_values: BTreeMap<String, f64>,
+    #[serde(default)]
+    pub connection_memory: BTreeMap<String, f64>,
+    #[serde(default)]
+    pub connection_prev_input: BTreeMap<String, f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -456,6 +473,9 @@ pub enum PolicyNativeError {
         node_id: i64,
         aggregation: String,
     },
+    ConnectionGruUnsupported {
+        node_id: i64,
+    },
     BufferOverflow(&'static str),
     MissingRecurrentBuffer(&'static str),
     InputRowSizeMismatch {
@@ -509,6 +529,9 @@ impl From<policy_gpu::NativePolicyGpuError> for PolicyNativeError {
                 node_id,
                 aggregation,
             },
+            policy_gpu::NativePolicyGpuError::ConnectionGruUnsupported { node_id } => {
+                Self::ConnectionGruUnsupported { node_id }
+            }
             policy_gpu::NativePolicyGpuError::BufferOverflow(label) => Self::BufferOverflow(label),
             policy_gpu::NativePolicyGpuError::MissingRecurrentBuffer(label) => {
                 Self::MissingRecurrentBuffer(label)
@@ -557,6 +580,10 @@ impl fmt::Display for PolicyNativeError {
             } => write!(
                 f,
                 "native policy CUDA currently supports only sum aggregation; node {node_id} uses {aggregation}"
+            ),
+            Self::ConnectionGruUnsupported { node_id } => write!(
+                f,
+                "native policy CUDA does not support connection-GRU edges yet; node {node_id} uses one"
             ),
             Self::BufferOverflow(label) => write!(f, "{label} size overflow"),
             Self::MissingRecurrentBuffer(label) => {
@@ -764,10 +791,10 @@ fn evaluate_policy_batch_cpu(
     for input_row in &request.inputs {
         if spec.is_recurrent() {
             let (row_outputs, next_snapshot) =
-                evaluate_recurrent_cpu(spec, input_row, &base_snapshot);
+                evaluate_recurrent_cpu(spec, input_row, &base_snapshot, request.snapshot.as_ref());
             outputs.push(row_outputs);
             if let Some(all) = snapshots.as_mut() {
-                all.push(Some(dense_snapshot_to_json(spec, &next_snapshot)));
+                all.push(Some(next_snapshot));
             }
         } else {
             outputs.push(evaluate_feedforward_cpu(spec, input_row));
@@ -809,18 +836,50 @@ fn evaluate_recurrent_cpu(
     spec: &CompiledPolicySpec,
     input_row: &[f64],
     base_snapshot: &[f64],
-) -> (Vec<f64>, Vec<f64>) {
+    snapshot: Option<&CompiledPolicySnapshot>,
+) -> (Vec<f64>, CompiledPolicySnapshot) {
     let mut next_values = vec![0.0; spec.node_evals.len()];
+    let mut connection_memory = BTreeMap::new();
+    let mut connection_prev_input = BTreeMap::new();
     let mut terms = Vec::new();
 
     for (node_index, node) in spec.node_evals.iter().enumerate() {
         terms.clear();
-        for edge in &node.incoming {
+        for (edge_index, edge) in node.incoming.iter().enumerate() {
             let source_value = match edge.source_kind {
                 PolicyIncomingSource::Input => input_row[edge.source_index],
                 PolicyIncomingSource::Node => base_snapshot[edge.source_index],
             };
-            terms.push(source_value * edge.weight);
+            let contribution = if edge.connection_gru_enabled {
+                let state_key = connection_state_key(node.node_id, edge_index);
+                let previous_memory = snapshot
+                    .and_then(|snapshot| snapshot.connection_memory.get(&state_key))
+                    .copied()
+                    .unwrap_or(0.0);
+                let previous_input = snapshot
+                    .and_then(|snapshot| snapshot.connection_prev_input.get(&state_key))
+                    .copied()
+                    .unwrap_or(0.0);
+                let reset_gate = sigmoid(
+                    (source_value * edge.connection_reset_input_weight)
+                        + (previous_memory * edge.connection_reset_memory_weight),
+                );
+                let candidate_memory = ((previous_input * edge.weight)
+                    + (reset_gate * previous_memory * edge.connection_memory_weight))
+                    .tanh();
+                let update_gate = sigmoid(
+                    (source_value * edge.connection_update_input_weight)
+                        + (previous_memory * edge.connection_update_memory_weight),
+                );
+                let next_memory =
+                    (update_gate * previous_memory) + ((1.0 - update_gate) * candidate_memory);
+                connection_memory.insert(state_key.clone(), next_memory);
+                connection_prev_input.insert(state_key, source_value);
+                (source_value * edge.weight) + (next_memory * edge.connection_memory_weight)
+            } else {
+                source_value * edge.weight
+            };
+            terms.push(contribution);
         }
         let aggregated = node.aggregation.apply(&terms);
         let candidate_pre = node.bias + (node.response * aggregated);
@@ -839,7 +898,10 @@ fn evaluate_recurrent_cpu(
         .iter()
         .map(|&index| next_values[index])
         .collect();
-    (outputs, next_values)
+    (
+        outputs,
+        dense_snapshot_to_json(spec, &next_values, connection_memory, connection_prev_input),
+    )
 }
 
 fn recurrent_snapshot_to_dense(
@@ -858,7 +920,12 @@ fn recurrent_snapshot_to_dense(
     dense
 }
 
-fn dense_snapshot_to_json(spec: &CompiledPolicySpec, values: &[f64]) -> CompiledPolicySnapshot {
+fn dense_snapshot_to_json(
+    spec: &CompiledPolicySpec,
+    values: &[f64],
+    connection_memory: BTreeMap<String, f64>,
+    connection_prev_input: BTreeMap<String, f64>,
+) -> CompiledPolicySnapshot {
     let mut node_values = BTreeMap::new();
     for (index, node) in spec.node_evals.iter().enumerate() {
         node_values.insert(
@@ -866,7 +933,15 @@ fn dense_snapshot_to_json(spec: &CompiledPolicySpec, values: &[f64]) -> Compiled
             values.get(index).copied().unwrap_or(0.0),
         );
     }
-    CompiledPolicySnapshot { node_values }
+    CompiledPolicySnapshot {
+        node_values,
+        connection_memory,
+        connection_prev_input,
+    }
+}
+
+fn connection_state_key(node_id: i64, edge_index: usize) -> String {
+    format!("{node_id}:{edge_index}")
 }
 
 fn sigmoid(value: f64) -> f64 {
@@ -928,6 +1003,24 @@ impl Error for PolicyBridgeError {}
 mod tests {
     use super::*;
 
+    fn plain_edge(
+        source_kind: PolicyIncomingSource,
+        source_index: usize,
+        weight: f64,
+    ) -> PolicyIncomingEdge {
+        PolicyIncomingEdge {
+            source_kind,
+            source_index,
+            weight,
+            connection_gru_enabled: false,
+            connection_memory_weight: 0.0,
+            connection_reset_input_weight: 0.0,
+            connection_reset_memory_weight: 0.0,
+            connection_update_input_weight: 0.0,
+            connection_update_memory_weight: 0.0,
+        }
+    }
+
     fn feedforward_fixture() -> CompiledPolicySpec {
         CompiledPolicySpec {
             network_type: PolicyNetworkType::FeedForward,
@@ -943,16 +1036,8 @@ mod tests {
                 memory_gate_bias: 0.0,
                 memory_gate_response: 1.0,
                 incoming: vec![
-                    PolicyIncomingEdge {
-                        source_kind: PolicyIncomingSource::Input,
-                        source_index: 0,
-                        weight: 2.0,
-                    },
-                    PolicyIncomingEdge {
-                        source_kind: PolicyIncomingSource::Input,
-                        source_index: 1,
-                        weight: -1.0,
-                    },
+                    plain_edge(PolicyIncomingSource::Input, 0, 2.0),
+                    plain_edge(PolicyIncomingSource::Input, 1, -1.0),
                 ],
             }],
         }
@@ -992,16 +1077,8 @@ mod tests {
                 memory_gate_bias: 0.0,
                 memory_gate_response: 1.0,
                 incoming: vec![
-                    PolicyIncomingEdge {
-                        source_kind: PolicyIncomingSource::Input,
-                        source_index: 0,
-                        weight: 1.0,
-                    },
-                    PolicyIncomingEdge {
-                        source_kind: PolicyIncomingSource::Node,
-                        source_index: 0,
-                        weight: 1.0,
-                    },
+                    plain_edge(PolicyIncomingSource::Input, 0, 1.0),
+                    plain_edge(PolicyIncomingSource::Node, 0, 1.0),
                 ],
             }],
         };
@@ -1013,6 +1090,7 @@ mod tests {
                 inputs: vec![vec![1.0]],
                 snapshot: Some(CompiledPolicySnapshot {
                     node_values: snapshot_values,
+                    ..CompiledPolicySnapshot::default()
                 }),
             },
             PolicyBridgeBackend::Cpu,
@@ -1029,5 +1107,58 @@ mod tests {
             .as_ref()
             .expect("recurrent sample should include snapshot");
         assert!((next.node_values["0"] - expected_value).abs() < 1e-12);
+    }
+
+    #[test]
+    fn evaluates_recurrent_connection_gru_state_on_cpu() {
+        let spec = CompiledPolicySpec {
+            network_type: PolicyNetworkType::Recurrent,
+            input_count: 1,
+            output_indices: vec![0],
+            node_evals: vec![CompiledPolicyNodeEval {
+                node_id: 0,
+                activation: PolicyActivation::Identity,
+                aggregation: PolicyAggregation::Sum,
+                bias: 0.0,
+                response: 1.0,
+                memory_gate_enabled: false,
+                memory_gate_bias: 0.0,
+                memory_gate_response: 1.0,
+                incoming: vec![PolicyIncomingEdge {
+                    connection_gru_enabled: true,
+                    connection_memory_weight: 1.0,
+                    ..plain_edge(PolicyIncomingSource::Input, 0, 1.0)
+                }],
+            }],
+        };
+
+        let first = evaluate_policy_batch(
+            &spec,
+            &CompiledPolicyRequest {
+                inputs: vec![vec![2.0]],
+                snapshot: None,
+            },
+            PolicyBridgeBackend::Cpu,
+        )
+        .expect("first recurrent policy evaluation should succeed");
+        assert!((first.outputs[0][0] - 2.0).abs() < 1e-12);
+
+        let first_snapshot = first
+            .snapshots
+            .and_then(|mut snapshots| snapshots.remove(0))
+            .expect("first step should return connection state");
+        assert_eq!(first_snapshot.connection_prev_input["0:0"], 2.0);
+
+        let second = evaluate_policy_batch(
+            &spec,
+            &CompiledPolicyRequest {
+                inputs: vec![vec![2.0]],
+                snapshot: Some(first_snapshot),
+            },
+            PolicyBridgeBackend::Cpu,
+        )
+        .expect("second recurrent policy evaluation should succeed");
+        let expected_memory = 0.5 * 2.0_f64.tanh();
+        assert!((second.outputs[0][0] - (2.0 + expected_memory)).abs() < 1e-12);
     }
 }

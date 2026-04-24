@@ -98,7 +98,11 @@ impl Error for CheckpointError {}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CheckpointDocument {
     format_version: String,
+    #[serde(default = "crate_version")]
+    crate_version: String,
     config_path: Option<PathBuf>,
+    #[serde(default)]
+    config_hash: Option<String>,
     generation: usize,
     skip_first_evaluation: bool,
     rng_state: u64,
@@ -112,7 +116,9 @@ impl CheckpointDocument {
     fn from_population(checkpointer: &Checkpointer, population: &Population) -> Self {
         Self {
             format_version: CHECKPOINT_FORMAT_VERSION.to_string(),
+            crate_version: crate_version(),
             config_path: checkpointer.config_path.clone(),
+            config_hash: checkpointer.config_path.as_ref().and_then(config_file_hash),
             generation: population.generation,
             skip_first_evaluation: population.skip_first_evaluation,
             rng_state: population.rng_state(),
@@ -145,18 +151,39 @@ impl CheckpointDocument {
         }
 
         let config_path = self.config_path.ok_or(CheckpointError::MissingConfigPath)?;
+        if let Some(expected_hash) = self.config_hash.as_deref() {
+            let actual_hash = config_file_hash(&config_path).ok_or_else(|| {
+                CheckpointError::Config(format!(
+                    "failed to hash config file {}",
+                    config_path.display()
+                ))
+            })?;
+            if actual_hash != expected_hash {
+                return Err(CheckpointError::Config(format!(
+                    "config hash mismatch for {}: checkpoint={expected_hash}, current={actual_hash}",
+                    config_path.display()
+                )));
+            }
+        }
         let config = Config::from_file(&config_path)
             .map_err(|err| CheckpointError::Config(err.to_string()))?;
 
         let mut population = BTreeMap::new();
         for document in self.population {
             let genome = document.into_genome()?;
+            genome
+                .validate(&config.genome)
+                .map_err(|err| CheckpointError::Invalid(err.to_string()))?;
             population.insert(genome.key, genome);
         }
         let best_genome = self
             .best_genome
             .map(GenomeDocument::into_genome)
             .transpose()?;
+        if let Some(best) = &best_genome {
+            best.validate(&config.genome)
+                .map_err(|err| CheckpointError::Invalid(err.to_string()))?;
+        }
         let species_set = self.species_set.into_species_set(&population)?;
         let reproduction = self.reproduction.into_state();
 
@@ -177,6 +204,8 @@ impl CheckpointDocument {
 struct ReproductionDocument {
     genome_indexer: i64,
     innovation: i64,
+    #[serde(default)]
+    generations_without_improvement: usize,
     ancestors: Vec<AncestorDocument>,
 }
 
@@ -185,6 +214,7 @@ impl ReproductionDocument {
         Self {
             genome_indexer: state.genome_indexer.raw(),
             innovation: state.innovation_tracker.current_innovation_number(),
+            generations_without_improvement: state.generations_without_improvement,
             ancestors: state
                 .ancestors
                 .iter()
@@ -215,6 +245,7 @@ impl ReproductionDocument {
             genome_indexer: GenomeId::new(self.genome_indexer),
             ancestors,
             innovation_tracker: InnovationTracker::with_start_number(self.innovation),
+            generations_without_improvement: self.generations_without_improvement,
         }
     }
 }
@@ -422,6 +453,18 @@ struct ConnectionGeneDocument {
     output: i64,
     innovation: Option<i64>,
     weight: f64,
+    #[serde(default)]
+    connection_gru_enabled: bool,
+    #[serde(default)]
+    connection_memory_weight: f64,
+    #[serde(default)]
+    connection_reset_input_weight: f64,
+    #[serde(default)]
+    connection_reset_memory_weight: f64,
+    #[serde(default)]
+    connection_update_input_weight: f64,
+    #[serde(default)]
+    connection_update_memory_weight: f64,
     enabled: bool,
 }
 
@@ -432,6 +475,12 @@ impl ConnectionGeneDocument {
             output: gene.key.output,
             innovation: gene.innovation,
             weight: gene.weight,
+            connection_gru_enabled: gene.connection_gru_enabled,
+            connection_memory_weight: gene.connection_memory_weight,
+            connection_reset_input_weight: gene.connection_reset_input_weight,
+            connection_reset_memory_weight: gene.connection_reset_memory_weight,
+            connection_update_input_weight: gene.connection_update_input_weight,
+            connection_update_memory_weight: gene.connection_update_memory_weight,
             enabled: gene.enabled,
         }
     }
@@ -441,6 +490,12 @@ impl ConnectionGeneDocument {
             key: ConnectionKey::new(self.input, self.output),
             innovation: self.innovation,
             weight: self.weight,
+            connection_gru_enabled: self.connection_gru_enabled,
+            connection_memory_weight: self.connection_memory_weight,
+            connection_reset_input_weight: self.connection_reset_input_weight,
+            connection_reset_memory_weight: self.connection_reset_memory_weight,
+            connection_update_input_weight: self.connection_update_input_weight,
+            connection_update_memory_weight: self.connection_update_memory_weight,
             enabled: self.enabled,
         }
     }
@@ -460,6 +515,26 @@ fn parse_aggregation(value: &str) -> Result<AggregationFunction, CheckpointError
 
 fn finite_option(value: Option<f64>) -> Option<f64> {
     value.filter(|value| value.is_finite())
+}
+
+fn crate_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
+fn config_file_hash(path: impl AsRef<Path>) -> Option<String> {
+    let text = fs::read_to_string(path).ok()?;
+    Some(stable_text_hash(&text))
+}
+
+fn stable_text_hash(text: &str) -> String {
+    const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+    let mut hash = FNV_OFFSET;
+    for byte in text.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    format!("{hash:016x}")
 }
 
 #[cfg(test)]

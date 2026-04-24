@@ -4,7 +4,9 @@ use std::fmt;
 use std::sync::Arc;
 
 use crate::attributes::XorShiftRng;
+use crate::bootstrap::{BootstrapError, BootstrapStrategy};
 use crate::config::Config;
+use crate::evaluator::BatchEvaluator;
 use crate::evolution::{
     sync_species_members, PopulationCheckpointError, PopulationCheckpointSink,
     PopulationFitnessSummary, PopulationFitnessSummaryError,
@@ -59,6 +61,7 @@ impl From<&str> for FitnessError {
 pub enum PopulationError {
     Genome(GenomeError),
     Reproduction(ReproductionError),
+    Bootstrap(BootstrapError),
     Checkpoint(PopulationCheckpointError),
     Fitness(FitnessError),
     FitnessNotAssigned(GenomeId),
@@ -85,6 +88,32 @@ impl Population {
         let mut rng = XorShiftRng::seed_from_u64(seed);
         let mut reproduction = ReproductionState::new();
         let population = reproduction.create_new(&config, config.neat.pop_size, &mut rng)?;
+        let mut species = SpeciesSet::new();
+        species.speciate(&config, &population, 0)?;
+
+        Ok(Self {
+            config,
+            population,
+            species,
+            generation: 0,
+            best_genome: None,
+            reproduction,
+            reporters: ReporterSet::new(),
+            checkpoint_sink: None,
+            skip_first_evaluation: false,
+            rng,
+        })
+    }
+
+    pub fn new_with_bootstrap(
+        config: Config,
+        seed: u64,
+        strategy: BootstrapStrategy,
+    ) -> Result<Self, PopulationError> {
+        let mut rng = XorShiftRng::seed_from_u64(seed);
+        let mut reproduction = ReproductionState::new();
+        let mut population = reproduction.create_new(&config, config.neat.pop_size, &mut rng)?;
+        strategy.apply(&mut population, &config, &mut reproduction, &mut rng)?;
         let mut species = SpeciesSet::new();
         species.speciate(&config, &population, 0)?;
 
@@ -164,6 +193,20 @@ impl Population {
         Ok(self.best_genome.clone())
     }
 
+    pub fn run_with_evaluator<E>(
+        &mut self,
+        evaluator: &mut E,
+        generations: Option<usize>,
+    ) -> Result<Option<DefaultGenome>, PopulationError>
+    where
+        E: BatchEvaluator + ?Sized,
+    {
+        self.run(
+            |genomes, config| evaluator.evaluate_population(genomes, config),
+            generations,
+        )
+    }
+
     fn run_generation<F>(&mut self, fitness_function: &mut F) -> Result<bool, PopulationError>
     where
         F: FnMut(&mut BTreeMap<GenomeId, DefaultGenome>, &Config) -> FitnessResult,
@@ -196,7 +239,7 @@ impl Population {
         self.reporters
             .post_evaluate(&self.config, &self.population, &self.species, &best);
 
-        if self
+        let improved = self
             .best_genome
             .as_ref()
             .map(|current| {
@@ -206,10 +249,11 @@ impl Population {
                     &self.config,
                 )
             })
-            .unwrap_or(true)
-        {
+            .unwrap_or(true);
+        if improved {
             self.best_genome = Some(best.clone());
         }
+        self.reproduction.record_global_improvement(improved);
 
         self.save_generation_checkpoint()?;
 
@@ -271,6 +315,7 @@ impl fmt::Display for PopulationError {
         match self {
             Self::Genome(err) => write!(f, "{err}"),
             Self::Reproduction(err) => write!(f, "{err}"),
+            Self::Bootstrap(err) => write!(f, "{err}"),
             Self::Checkpoint(err) => write!(f, "{err}"),
             Self::Fitness(err) => write!(f, "fitness function failed: {err}"),
             Self::FitnessNotAssigned(key) => write!(f, "fitness not assigned to genome {key}"),
@@ -294,6 +339,12 @@ impl From<ReproductionError> for PopulationError {
     }
 }
 
+impl From<BootstrapError> for PopulationError {
+    fn from(value: BootstrapError) -> Self {
+        Self::Bootstrap(value)
+    }
+}
+
 impl From<PopulationCheckpointError> for PopulationError {
     fn from(value: PopulationCheckpointError) -> Self {
         Self::Checkpoint(value)
@@ -314,6 +365,9 @@ impl From<PopulationFitnessSummaryError> for PopulationError {
     fn from(value: PopulationFitnessSummaryError) -> Self {
         match value {
             PopulationFitnessSummaryError::FitnessNotAssigned(key) => Self::FitnessNotAssigned(key),
+            PopulationFitnessSummaryError::InvalidFitness { genome_key, value } => {
+                Self::Genome(GenomeError::InvalidFitness { genome_key, value })
+            }
             PopulationFitnessSummaryError::NoBestGenome => Self::NoBestGenome,
         }
     }

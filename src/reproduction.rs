@@ -16,6 +16,7 @@ pub struct ReproductionState {
     pub genome_indexer: GenomeId,
     pub ancestors: BTreeMap<GenomeId, (Option<GenomeId>, Option<GenomeId>)>,
     pub innovation_tracker: InnovationTracker,
+    pub generations_without_improvement: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -31,6 +32,16 @@ impl ReproductionState {
             genome_indexer: GenomeId::new(1),
             ancestors: BTreeMap::new(),
             innovation_tracker: InnovationTracker::new(),
+            generations_without_improvement: 0,
+        }
+    }
+
+    pub fn record_global_improvement(&mut self, improved: bool) {
+        if improved {
+            self.generations_without_improvement = 0;
+        } else {
+            self.generations_without_improvement =
+                self.generations_without_improvement.saturating_add(1);
         }
     }
 
@@ -88,6 +99,10 @@ impl ReproductionState {
 
         adjust_fitnesses(&mut remaining_species, &all_fitnesses, config);
         let spawn_plan = SpawnPlan::build(config, &remaining_species, pop_size)?;
+        let mutation_config = config
+            .reproduction
+            .adaptive_mutation
+            .adapted_genome_config(&config.genome, self.generations_without_improvement);
 
         let mut new_population = BTreeMap::new();
         species_set.species.clear();
@@ -137,7 +152,11 @@ impl ReproductionState {
                     Some(&config.neat.fitness_criterion),
                     rng,
                 )?;
-                child.mutate_with_innovation(&config.genome, &mut self.innovation_tracker, rng)?;
+                child.mutate_with_innovation(
+                    &mutation_config,
+                    &mut self.innovation_tracker,
+                    rng,
+                )?;
                 new_population.insert(child_key, child);
                 self.ancestors
                     .insert(child_key, (Some(*parent1_id), Some(*parent2_id)));

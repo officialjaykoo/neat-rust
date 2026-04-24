@@ -110,6 +110,27 @@ fn push_connections_value(out: &mut String, genome: &DefaultGenome) {
         connection_object.i64_field("in_node", connection.key.input);
         connection_object.i64_field("out_node", connection.key.output);
         connection_object.f64_field("weight", connection.weight);
+        connection_object.bool_field("connection_gru_enabled", connection.connection_gru_enabled);
+        connection_object.f64_field(
+            "connection_memory_weight",
+            connection.connection_memory_weight,
+        );
+        connection_object.f64_field(
+            "connection_reset_input_weight",
+            connection.connection_reset_input_weight,
+        );
+        connection_object.f64_field(
+            "connection_reset_memory_weight",
+            connection.connection_reset_memory_weight,
+        );
+        connection_object.f64_field(
+            "connection_update_input_weight",
+            connection.connection_update_input_weight,
+        );
+        connection_object.f64_field(
+            "connection_update_memory_weight",
+            connection.connection_update_memory_weight,
+        );
         connection_object.bool_field("enabled", connection.enabled);
         connection_object.finish();
     }

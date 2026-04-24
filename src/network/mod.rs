@@ -10,4 +10,7 @@ pub use iznn::{
     INTRINSICALLY_BURSTING_PARAMS, LOW_THRESHOLD_SPIKING_PARAMS, REGULAR_SPIKING_PARAMS,
     RESONATOR_PARAMS, THALAMO_CORTICAL_PARAMS,
 };
-pub use recurrent::{RecurrentError, RecurrentNetwork, RecurrentNodeEval};
+pub use recurrent::{
+    RecurrentConnectionEval, RecurrentConnectionState, RecurrentError, RecurrentNetwork,
+    RecurrentNodeEval,
+};

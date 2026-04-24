@@ -559,6 +559,12 @@ pub struct GenomeConfig {
     pub memory_gate_bias: FloatAttributeConfig,
     pub memory_gate_response: FloatAttributeConfig,
     pub enabled: BoolAttributeConfig,
+    pub connection_gru_enabled: BoolAttributeConfig,
+    pub connection_memory_weight: FloatAttributeConfig,
+    pub connection_reset_input_weight: FloatAttributeConfig,
+    pub connection_reset_memory_weight: FloatAttributeConfig,
+    pub connection_update_input_weight: FloatAttributeConfig,
+    pub connection_update_memory_weight: FloatAttributeConfig,
     pub compatibility_disjoint_coefficient: f64,
     pub compatibility_excess_coefficient: CompatibilityExcessCoefficient,
     pub compatibility_include_node_genes: bool,
@@ -591,6 +597,94 @@ pub struct ReproductionConfig {
     pub fitness_sharing: FitnessSharingMode,
     pub spawn_method: SpawnMethod,
     pub interspecies_crossover_prob: Probability,
+    pub adaptive_mutation: AdaptiveMutationConfig,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AdaptiveMutationConfig {
+    pub enabled: bool,
+    pub start_after: usize,
+    pub full_after: usize,
+    pub max_multiplier: f64,
+    pub caps: MutationRateCaps,
+}
+
+impl AdaptiveMutationConfig {
+    pub fn disabled() -> Self {
+        Self {
+            enabled: false,
+            start_after: 0,
+            full_after: 0,
+            max_multiplier: 1.0,
+            caps: MutationRateCaps::unlimited(),
+        }
+    }
+
+    pub fn multiplier(&self, generations_without_improvement: usize) -> f64 {
+        if !self.enabled || generations_without_improvement < self.start_after {
+            return 1.0;
+        }
+        let max_multiplier = self.max_multiplier.max(1.0);
+        if self.full_after <= self.start_after {
+            return max_multiplier;
+        }
+        let span = self.full_after - self.start_after;
+        let progressed = generations_without_improvement
+            .saturating_sub(self.start_after)
+            .min(span);
+        1.0 + ((max_multiplier - 1.0) * progressed as f64 / span as f64)
+    }
+
+    pub fn adapted_genome_config(
+        &self,
+        base: &GenomeConfig,
+        generations_without_improvement: usize,
+    ) -> GenomeConfig {
+        let multiplier = self.multiplier(generations_without_improvement);
+        if (multiplier - 1.0).abs() <= f64::EPSILON {
+            return base.clone();
+        }
+
+        let mut adapted = base.clone();
+        adapted.conn_add_prob =
+            scale_probability(base.conn_add_prob, multiplier, self.caps.conn_add_prob);
+        adapted.conn_delete_prob = scale_probability(
+            base.conn_delete_prob,
+            multiplier,
+            self.caps.conn_delete_prob,
+        );
+        adapted.node_add_prob =
+            scale_probability(base.node_add_prob, multiplier, self.caps.node_add_prob);
+        adapted.node_delete_prob = scale_probability(
+            base.node_delete_prob,
+            multiplier,
+            self.caps.node_delete_prob,
+        );
+        adapted
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MutationRateCaps {
+    pub conn_add_prob: Probability,
+    pub conn_delete_prob: Probability,
+    pub node_add_prob: Probability,
+    pub node_delete_prob: Probability,
+}
+
+impl MutationRateCaps {
+    pub fn unlimited() -> Self {
+        Self {
+            conn_add_prob: Probability::one(),
+            conn_delete_prob: Probability::one(),
+            node_add_prob: Probability::one(),
+            node_delete_prob: Probability::one(),
+        }
+    }
+}
+
+fn scale_probability(base: Probability, multiplier: f64, cap: Probability) -> Probability {
+    Probability::new((base.value() * multiplier.max(1.0)).min(cap.value()))
 }
 
 pub trait ConfigChoice: Copy + PartialEq + fmt::Display {
@@ -743,7 +837,9 @@ impl Config {
     }
 
     pub fn from_toml_str(text: &str) -> Result<Self, ConfigError> {
-        TomlConfigDocument::from_str(text)?.into_config()
+        let config = TomlConfigDocument::from_str(text)?.into_config()?;
+        config.validate()?;
+        Ok(config)
     }
 
     pub fn input_keys(&self) -> Vec<i64> {
@@ -766,5 +862,233 @@ impl Config {
 
     pub fn worst_fitness(&self) -> f64 {
         self.neat.fitness_criterion.worst_value()
+    }
+
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        validate_positive_usize("neat", "pop_size", self.neat.pop_size)?;
+        validate_finite("neat", "fitness_threshold", self.neat.fitness_threshold)?;
+        validate_positive_usize("genome", "num_inputs", self.genome.num_inputs)?;
+        validate_positive_usize("genome", "num_outputs", self.genome.num_outputs)?;
+        validate_non_negative_finite(
+            "genome",
+            "compatibility_disjoint_coefficient",
+            self.genome.compatibility_disjoint_coefficient,
+        )?;
+        validate_non_negative_finite(
+            "genome",
+            "compatibility_enable_penalty",
+            self.genome.compatibility_enable_penalty,
+        )?;
+        validate_non_negative_finite(
+            "genome",
+            "compatibility_weight_coefficient",
+            self.genome.compatibility_weight_coefficient,
+        )?;
+        validate_choice_attribute("genome.activation", "activation", &self.genome.activation)?;
+        validate_choice_attribute(
+            "genome.aggregation",
+            "aggregation",
+            &self.genome.aggregation,
+        )?;
+        validate_float_attribute("genome.bias", "bias", &self.genome.bias)?;
+        validate_float_attribute("genome.response", "response", &self.genome.response)?;
+        validate_float_attribute(
+            "genome.time_constant",
+            "time_constant",
+            &self.genome.time_constant,
+        )?;
+        validate_float_attribute("genome.iz_a", "iz_a", &self.genome.iz_a)?;
+        validate_float_attribute("genome.iz_b", "iz_b", &self.genome.iz_b)?;
+        validate_float_attribute("genome.iz_c", "iz_c", &self.genome.iz_c)?;
+        validate_float_attribute("genome.iz_d", "iz_d", &self.genome.iz_d)?;
+        validate_float_attribute(
+            "genome.memory_gate_bias",
+            "memory_gate_bias",
+            &self.genome.memory_gate_bias,
+        )?;
+        validate_float_attribute(
+            "genome.memory_gate_response",
+            "memory_gate_response",
+            &self.genome.memory_gate_response,
+        )?;
+        validate_float_attribute(
+            "genome.connection_memory_weight",
+            "connection_memory_weight",
+            &self.genome.connection_memory_weight,
+        )?;
+        validate_float_attribute(
+            "genome.connection_reset_input_weight",
+            "connection_reset_input_weight",
+            &self.genome.connection_reset_input_weight,
+        )?;
+        validate_float_attribute(
+            "genome.connection_reset_memory_weight",
+            "connection_reset_memory_weight",
+            &self.genome.connection_reset_memory_weight,
+        )?;
+        validate_float_attribute(
+            "genome.connection_update_input_weight",
+            "connection_update_input_weight",
+            &self.genome.connection_update_input_weight,
+        )?;
+        validate_float_attribute(
+            "genome.connection_update_memory_weight",
+            "connection_update_memory_weight",
+            &self.genome.connection_update_memory_weight,
+        )?;
+        validate_float_attribute("genome.weight", "weight", &self.genome.weight)?;
+
+        validate_non_negative_finite(
+            "species_set",
+            "compatibility_threshold",
+            self.species_set.compatibility_threshold,
+        )?;
+        validate_non_negative_finite(
+            "species_set",
+            "threshold_adjust_rate",
+            self.species_set.threshold_adjust_rate,
+        )?;
+        validate_non_negative_finite(
+            "species_set",
+            "threshold_min",
+            self.species_set.threshold_min,
+        )?;
+        validate_non_negative_finite(
+            "species_set",
+            "threshold_max",
+            self.species_set.threshold_max,
+        )?;
+        if self.species_set.threshold_min > self.species_set.threshold_max {
+            return Err(invalid_config(
+                "species_set",
+                "threshold_min",
+                self.species_set.threshold_min,
+                "must be <= threshold_max",
+            ));
+        }
+        if self.species_set.compatibility_threshold < self.species_set.threshold_min
+            || self.species_set.compatibility_threshold > self.species_set.threshold_max
+        {
+            return Err(invalid_config(
+                "species_set",
+                "compatibility_threshold",
+                self.species_set.compatibility_threshold,
+                "must be inside [threshold_min, threshold_max]",
+            ));
+        }
+
+        if self.reproduction.elitism > self.neat.pop_size {
+            return Err(invalid_config(
+                "reproduction",
+                "elitism",
+                self.reproduction.elitism,
+                "must be <= neat.pop_size",
+            ));
+        }
+        validate_positive_usize(
+            "reproduction",
+            "min_species_size",
+            self.reproduction.min_species_size,
+        )?;
+        if self.reproduction.min_species_size > self.neat.pop_size {
+            return Err(invalid_config(
+                "reproduction",
+                "min_species_size",
+                self.reproduction.min_species_size,
+                "must be <= neat.pop_size",
+            ));
+        }
+        if self.reproduction.adaptive_mutation.enabled {
+            validate_non_negative_finite(
+                "reproduction.adaptive_mutation",
+                "max_multiplier",
+                self.reproduction.adaptive_mutation.max_multiplier,
+            )?;
+            if self.reproduction.adaptive_mutation.max_multiplier < 1.0 {
+                return Err(invalid_config(
+                    "reproduction.adaptive_mutation",
+                    "max_multiplier",
+                    self.reproduction.adaptive_mutation.max_multiplier,
+                    "must be >= 1.0",
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+fn validate_choice_attribute<T: ConfigChoice>(
+    section: &str,
+    key: &str,
+    config: &ChoiceAttributeConfig<T>,
+) -> Result<(), ConfigError> {
+    if config.options.is_empty() {
+        return Err(invalid_config(section, "options", "", "must not be empty"));
+    }
+    if let ChoiceAttributeDefault::Value(value) = config.default {
+        if !config.options.contains(&value) {
+            return Err(invalid_config(
+                section,
+                key,
+                value.name(),
+                "default value must be included in options",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_float_attribute(
+    section: &str,
+    key: &str,
+    config: &FloatAttributeConfig,
+) -> Result<(), ConfigError> {
+    validate_finite(section, "init_mean", config.init_mean)?;
+    validate_non_negative_finite(section, "init_stdev", config.init_stdev)?;
+    validate_finite(section, "min_value", config.min_value)?;
+    validate_finite(section, "max_value", config.max_value)?;
+    validate_non_negative_finite(section, "mutate_power", config.mutate_power)?;
+    if config.min_value > config.max_value {
+        return Err(invalid_config(
+            section,
+            key,
+            format!("{}..{}", config.min_value, config.max_value),
+            "min_value must be <= max_value",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_positive_usize(section: &str, key: &str, value: usize) -> Result<(), ConfigError> {
+    if value == 0 {
+        Err(invalid_config(section, key, value, "must be > 0"))
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_finite(section: &str, key: &str, value: f64) -> Result<(), ConfigError> {
+    if value.is_finite() {
+        Ok(())
+    } else {
+        Err(invalid_config(section, key, value, "must be finite"))
+    }
+}
+
+fn validate_non_negative_finite(section: &str, key: &str, value: f64) -> Result<(), ConfigError> {
+    validate_finite(section, key, value)?;
+    if value < 0.0 {
+        Err(invalid_config(section, key, value, "must be >= 0"))
+    } else {
+        Ok(())
+    }
+}
+
+fn invalid_config(section: &str, key: &str, value: impl ToString, message: &str) -> ConfigError {
+    ConfigError::InvalidValue {
+        section: section.to_string(),
+        key: key.to_string(),
+        value: value.to_string(),
+        message: message.to_string(),
     }
 }

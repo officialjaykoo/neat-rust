@@ -3,7 +3,10 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use neat_rust::{
-    algorithm::{Population, PopulationError, Reporter},
+    algorithm::{
+        DefaultGenome, FitnessError, FitnessEvaluator, GenomeId, Population, PopulationError,
+        Reporter,
+    },
     io::{new_rust_checkpoint_sink, Checkpointer, Config, TargetNumSpecies},
 };
 
@@ -40,6 +43,23 @@ fn runs_one_generation_with_synthetic_fitness() {
 
     assert_eq!(population.generation, 1);
     assert_eq!(population.population.len(), pop_size);
+    assert_eq!(best.fitness, Some(pop_size as f64));
+}
+
+#[test]
+fn runs_one_generation_with_fitness_evaluator_trait() {
+    let config = Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.toml"))
+        .expect("config should parse");
+    let pop_size = config.neat.pop_size;
+    let mut population = Population::new(config, 24).expect("population should initialize");
+    let mut evaluator = KeyFitnessEvaluator { calls: 0 };
+
+    let best = population
+        .run_with_evaluator(&mut evaluator, Some(1))
+        .expect("population should run")
+        .expect("best genome should exist");
+
+    assert_eq!(evaluator.calls, pop_size);
     assert_eq!(best.fitness, Some(pop_size as f64));
 }
 
@@ -196,5 +216,21 @@ struct ExtinctionReporter {
 impl Reporter for ExtinctionReporter {
     fn complete_extinction(&mut self) {
         *self.count.borrow_mut() += 1;
+    }
+}
+
+struct KeyFitnessEvaluator {
+    calls: usize,
+}
+
+impl FitnessEvaluator for KeyFitnessEvaluator {
+    fn evaluate_genome(
+        &mut self,
+        genome_id: GenomeId,
+        _genome: &DefaultGenome,
+        _config: &Config,
+    ) -> Result<f64, FitnessError> {
+        self.calls += 1;
+        Ok(genome_id.raw() as f64)
     }
 }

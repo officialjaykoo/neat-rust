@@ -7,6 +7,8 @@ pub struct StagnationUpdate {
     pub species_id: SpeciesId,
     pub species: Species,
     pub stagnant: bool,
+    pub stagnant_time: usize,
+    pub protected_by_elitism: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -67,7 +69,9 @@ impl DefaultStagnation {
             if num_non_stagnant > config.stagnation.species_elitism {
                 stagnant = stagnant_time >= config.stagnation.max_stagnation;
             }
-            if (species_set.species.len() - idx) <= config.stagnation.species_elitism {
+            let protected_by_elitism =
+                (species_set.species.len() - idx) <= config.stagnation.species_elitism;
+            if protected_by_elitism {
                 stagnant = false;
             }
             if stagnant {
@@ -77,6 +81,8 @@ impl DefaultStagnation {
                 species_id,
                 species,
                 stagnant,
+                stagnant_time,
+                protected_by_elitism,
             });
         }
 

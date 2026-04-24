@@ -1,0 +1,100 @@
+[neat]
+fitness_criterion = "max"
+fitness_threshold = 3.9
+pop_size = 48
+reset_on_extinction = true
+no_fitness_termination = false
+
+[genome]
+num_inputs = 2
+num_outputs = 1
+num_hidden = 1
+feed_forward = true
+initial_connection = { mode = "full_direct" }
+conn_add_prob = 0.08
+conn_delete_prob = 0.02
+node_add_prob = 0.03
+node_delete_prob = 0.01
+single_structural_mutation = false
+structural_mutation_surer = "default"
+compatibility_disjoint_coefficient = 1.0
+compatibility_excess_coefficient = "auto"
+compatibility_include_node_genes = true
+compatibility_enable_penalty = 1.0
+compatibility_weight_coefficient = 0.5
+
+[genome.activation]
+default = "tanh"
+mutate_rate = 0.0
+options = ["tanh", "sigmoid", "identity"]
+
+[genome.aggregation]
+default = "sum"
+mutate_rate = 0.0
+options = ["sum"]
+
+[genome.bias]
+init_mean = 0.0
+init_stdev = 1.0
+init_type = "gaussian"
+max_value = 5.0
+min_value = -5.0
+mutate_power = 0.5
+mutate_rate = 0.7
+replace_rate = 0.1
+
+[genome.response]
+init_mean = 1.0
+init_stdev = 0.0
+init_type = "gaussian"
+max_value = 5.0
+min_value = -5.0
+mutate_power = 0.0
+mutate_rate = 0.0
+replace_rate = 0.0
+
+[genome.enabled]
+default = true
+mutate_rate = 0.01
+rate_to_true_add = 0.0
+rate_to_false_add = 0.0
+
+[genome.weight]
+init_mean = 0.0
+init_stdev = 1.0
+init_type = "gaussian"
+max_value = 5.0
+min_value = -5.0
+mutate_power = 0.5
+mutate_rate = 0.8
+replace_rate = 0.1
+
+[species_set]
+compatibility_threshold = 3.0
+target_num_species = "none"
+threshold_adjust_rate = 0.1
+threshold_min = 0.1
+threshold_max = 100.0
+
+[stagnation]
+species_fitness_func = "max"
+max_stagnation = 12
+species_elitism = 1
+
+[reproduction]
+elitism = 1
+survival_threshold = 0.25
+min_species_size = 2
+fitness_sharing = "normalized"
+spawn_method = "smoothed"
+interspecies_crossover_prob = 0.0
+
+[reproduction.adaptive_mutation]
+enabled = true
+start_after = 3
+full_after = 10
+max_multiplier = 3.0
+conn_add_prob_cap = 0.25
+conn_delete_prob_cap = 0.08
+node_add_prob_cap = 0.12
+node_delete_prob_cap = 0.04

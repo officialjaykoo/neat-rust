@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use neat_rust::{
@@ -6,8 +7,8 @@ use neat_rust::{
     },
     io::Config,
     network::{
-        Ctrnn, FeedForwardError, FeedForwardNetwork, Iznn, NodeEval, RecurrentError,
-        RecurrentNetwork, RecurrentNodeEval,
+        Ctrnn, FeedForwardError, FeedForwardNetwork, Iznn, NodeEval, RecurrentConnectionEval,
+        RecurrentError, RecurrentNetwork, RecurrentNodeEval,
     },
     prelude::{ActivationFunction, AggregationFunction},
 };
@@ -21,6 +22,19 @@ fn repo_path(relative: &str) -> PathBuf {
         .join("scripts")
         .join("configs")
         .join(relative)
+}
+
+fn recurrent_link(input: i64, weight: f64) -> RecurrentConnectionEval {
+    RecurrentConnectionEval {
+        input,
+        weight,
+        connection_gru_enabled: false,
+        connection_memory_weight: 0.0,
+        connection_reset_input_weight: 0.0,
+        connection_reset_memory_weight: 0.0,
+        connection_update_input_weight: 0.0,
+        connection_update_memory_weight: 0.0,
+    }
 }
 
 fn key(input: i64, output: i64) -> ConnectionKey {
@@ -145,7 +159,7 @@ fn recurrent_network_rejects_bad_input_count_like_simple_run() {
             aggregation: AggregationFunction::Sum,
             bias: 0.0,
             response: 1.0,
-            links: vec![(-1, 1.0), (-2, 1.0)],
+            links: vec![recurrent_link(-1, 1.0), recurrent_link(-2, 1.0)],
             memory_gate_enabled: false,
             memory_gate_bias: 0.0,
             memory_gate_response: 1.0,
@@ -204,6 +218,34 @@ fn recurrent_network_uses_previous_state_for_self_loop() {
 }
 
 #[test]
+fn recurrent_memory_gate_converges_and_resets() {
+    let mut network = RecurrentNetwork::new(
+        vec![-1],
+        vec![0],
+        vec![RecurrentNodeEval {
+            node: 0,
+            activation: ActivationFunction::Identity,
+            aggregation: AggregationFunction::Sum,
+            bias: 0.0,
+            response: 1.0,
+            links: vec![recurrent_link(-1, 1.0)],
+            memory_gate_enabled: true,
+            memory_gate_bias: 0.0,
+            memory_gate_response: 0.0,
+        }],
+    );
+
+    let first = network.activate(&[1.0]).expect("first step should run");
+    let second = network.activate(&[1.0]).expect("second step should run");
+    network.reset();
+    let after_reset = network.activate(&[1.0]).expect("reset step should run");
+
+    assert!((first[0] - 0.5).abs() < 1e-12);
+    assert!((second[0] - 0.75).abs() < 1e-12);
+    assert!((after_reset[0] - 0.5).abs() < 1e-12);
+}
+
+#[test]
 fn ctrnn_uses_exponential_euler_advance() {
     let config = Config::from_file(repo_path("scripts/configs/neat_recurrent_memory8.toml"))
         .expect("config should parse");
@@ -240,6 +282,38 @@ fn ctrnn_uses_exponential_euler_advance() {
     assert!((first[0] - expected_first).abs() < 1e-12);
     assert!((second[0] - expected_second).abs() < 1e-12);
     assert!((network.time_seconds() - 0.2).abs() < 1e-12);
+}
+
+#[test]
+fn ctrnn_long_run_stays_finite_and_matches_closed_form() {
+    let mut node_evals = BTreeMap::new();
+    node_evals.insert(
+        0,
+        neat_rust::network::CtrnnNodeEval {
+            time_constant: 2.0,
+            activation: ActivationFunction::Identity,
+            aggregation: AggregationFunction::Sum,
+            bias: 0.0,
+            response: 1.0,
+            links: vec![(-1, 1.0)],
+        },
+    );
+    let mut network = Ctrnn::new(vec![-1], vec![0], node_evals);
+
+    let one_second = network
+        .advance(&[1.0], 1.0, Some(0.01))
+        .expect("one second advance should run");
+    let ten_seconds = network
+        .advance(&[1.0], 9.0, Some(0.01))
+        .expect("long advance should run");
+
+    let expected_one_second = 1.0 - (-0.5_f64).exp();
+    let expected_ten_seconds = 1.0 - (-5.0_f64).exp();
+    assert!(one_second[0].is_finite());
+    assert!(ten_seconds[0].is_finite());
+    assert!((one_second[0] - expected_one_second).abs() < 1e-12);
+    assert!((ten_seconds[0] - expected_ten_seconds).abs() < 1e-12);
+    assert!(ten_seconds[0] <= 1.0);
 }
 
 #[test]

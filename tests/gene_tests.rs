@@ -153,19 +153,13 @@ fn node_gene_crossover_inherits_each_attribute_independently() {
 
 #[test]
 fn connection_gene_crossover_applies_disable_rule() {
-    let left = DefaultConnectionGene {
-        key: key(-1, 0),
-        innovation: None,
-        weight: 1.5,
-        enabled: true,
-    };
-    let right = DefaultConnectionGene {
-        key: key(-1, 0),
-        innovation: None,
-        weight: -1.5,
-        enabled: false,
-    };
-    let mut rng = SequenceRng::new(&[0.9, 0.9, 0.1]);
+    let mut left = DefaultConnectionGene::new(key(-1, 0));
+    left.weight = 1.5;
+    left.enabled = true;
+    let mut right = DefaultConnectionGene::new(key(-1, 0));
+    right.weight = -1.5;
+    right.enabled = false;
+    let mut rng = SequenceRng::new(&[0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.1]);
 
     let child = left
         .crossover(&right, &mut rng)
@@ -208,18 +202,12 @@ fn gene_distance_uses_config_weight_coefficient() {
         memory_gate_bias: 0.0,
         memory_gate_response: 1.0,
     };
-    let conn_left = DefaultConnectionGene {
-        key: key(-1, 0),
-        innovation: None,
-        weight: 0.25,
-        enabled: true,
-    };
-    let conn_right = DefaultConnectionGene {
-        key: key(-1, 0),
-        innovation: None,
-        weight: -0.25,
-        enabled: false,
-    };
+    let mut conn_left = DefaultConnectionGene::new(key(-1, 0));
+    conn_left.weight = 0.25;
+    conn_left.enabled = true;
+    let mut conn_right = DefaultConnectionGene::new(key(-1, 0));
+    conn_right.weight = -0.25;
+    conn_right.enabled = false;
 
     assert!((node_left.distance(&node_right, &config).unwrap() - 1.6).abs() < 1e-12);
     assert!((conn_left.distance(&conn_right, &config).unwrap() - 0.6).abs() < 1e-12);

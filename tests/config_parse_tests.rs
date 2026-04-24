@@ -67,6 +67,14 @@ fn parses_recurrent_memory8_config() {
         Probability::zero()
     );
     assert_eq!(config.reproduction.elitism, 2);
+    assert!(config.reproduction.adaptive_mutation.enabled);
+    assert_eq!(config.reproduction.adaptive_mutation.start_after, 4);
+    assert_eq!(config.reproduction.adaptive_mutation.full_after, 18);
+    assert_eq!(config.reproduction.adaptive_mutation.max_multiplier, 4.0);
+    assert_eq!(
+        config.reproduction.adaptive_mutation.caps.conn_add_prob,
+        Probability::new(0.30)
+    );
 }
 
 #[test]

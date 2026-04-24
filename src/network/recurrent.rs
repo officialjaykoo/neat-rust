@@ -16,10 +16,28 @@ pub struct RecurrentNodeEval {
     pub aggregation: AggregationFunction,
     pub bias: f64,
     pub response: f64,
-    pub links: Vec<(NodeKey, f64)>,
+    pub links: Vec<RecurrentConnectionEval>,
     pub memory_gate_enabled: bool,
     pub memory_gate_bias: f64,
     pub memory_gate_response: f64,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct RecurrentConnectionState {
+    pub memory: f64,
+    pub previous_input: f64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecurrentConnectionEval {
+    pub input: NodeKey,
+    pub weight: f64,
+    pub connection_gru_enabled: bool,
+    pub connection_memory_weight: f64,
+    pub connection_reset_input_weight: f64,
+    pub connection_reset_memory_weight: f64,
+    pub connection_update_input_weight: f64,
+    pub connection_update_memory_weight: f64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -28,6 +46,7 @@ pub struct RecurrentNetwork {
     pub output_nodes: Vec<NodeKey>,
     pub node_evals: Vec<RecurrentNodeEval>,
     values: [BTreeMap<NodeKey, f64>; 2],
+    connection_states: BTreeMap<(NodeKey, usize), RecurrentConnectionState>,
     active: usize,
 }
 
@@ -52,8 +71,8 @@ impl RecurrentNetwork {
             }
             for node_eval in &node_evals {
                 value_map.insert(node_eval.node, 0.0);
-                for (input_node, _) in &node_eval.links {
-                    value_map.insert(*input_node, 0.0);
+                for link in &node_eval.links {
+                    value_map.insert(link.input, 0.0);
                 }
             }
         }
@@ -63,6 +82,7 @@ impl RecurrentNetwork {
             output_nodes,
             node_evals,
             values,
+            connection_states: BTreeMap::new(),
             active: 0,
         }
     }
@@ -73,6 +93,7 @@ impl RecurrentNetwork {
                 *value = 0.0;
             }
         }
+        self.connection_states.clear();
         self.active = 0;
     }
 
@@ -95,12 +116,43 @@ impl RecurrentNetwork {
 
         for node_eval in &self.node_evals {
             let mut node_inputs = Vec::with_capacity(node_eval.links.len());
-            for (input_node, weight) in &node_eval.links {
+            for (edge_index, link) in node_eval.links.iter().enumerate() {
                 let value = self.values[input_index]
-                    .get(input_node)
+                    .get(&link.input)
                     .copied()
                     .unwrap_or(0.0);
-                node_inputs.push(value * *weight);
+                let contribution = if link.connection_gru_enabled {
+                    let state_key = (node_eval.node, edge_index);
+                    let previous = self
+                        .connection_states
+                        .get(&state_key)
+                        .copied()
+                        .unwrap_or_default();
+                    let reset_gate = sigmoid_gate(
+                        (value * link.connection_reset_input_weight)
+                            + (previous.memory * link.connection_reset_memory_weight),
+                    );
+                    let candidate_memory = ((previous.previous_input * link.weight)
+                        + (reset_gate * previous.memory * link.connection_memory_weight))
+                        .tanh();
+                    let update_gate = sigmoid_gate(
+                        (value * link.connection_update_input_weight)
+                            + (previous.memory * link.connection_update_memory_weight),
+                    );
+                    let next_memory =
+                        (update_gate * previous.memory) + ((1.0 - update_gate) * candidate_memory);
+                    self.connection_states.insert(
+                        state_key,
+                        RecurrentConnectionState {
+                            memory: next_memory,
+                            previous_input: value,
+                        },
+                    );
+                    (value * link.weight) + (next_memory * link.connection_memory_weight)
+                } else {
+                    value * link.weight
+                };
+                node_inputs.push(contribution);
             }
 
             let aggregated = node_eval.aggregation.apply(&node_inputs);
@@ -135,7 +187,7 @@ impl RecurrentNetwork {
         let all_connections: Vec<_> = genome.connections.keys().copied().collect();
         let required =
             required_for_output(&config_input_keys, &config_output_keys, &all_connections);
-        let mut node_inputs: BTreeMap<NodeKey, Vec<(NodeKey, f64)>> = BTreeMap::new();
+        let mut node_inputs: BTreeMap<NodeKey, Vec<RecurrentConnectionEval>> = BTreeMap::new();
 
         for connection_gene in genome.connections.values() {
             if !connection_gene.enabled {
@@ -151,7 +203,17 @@ impl RecurrentNetwork {
             node_inputs
                 .entry(output_node)
                 .or_default()
-                .push((input_node, connection_gene.weight));
+                .push(RecurrentConnectionEval {
+                    input: input_node,
+                    weight: connection_gene.weight,
+                    connection_gru_enabled: connection_gene.connection_gru_enabled,
+                    connection_memory_weight: connection_gene.connection_memory_weight,
+                    connection_reset_input_weight: connection_gene.connection_reset_input_weight,
+                    connection_reset_memory_weight: connection_gene.connection_reset_memory_weight,
+                    connection_update_input_weight: connection_gene.connection_update_input_weight,
+                    connection_update_memory_weight: connection_gene
+                        .connection_update_memory_weight,
+                });
         }
 
         let mut node_evals = Vec::new();

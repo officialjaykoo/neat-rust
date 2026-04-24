@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::attributes::RandomSource;
 use crate::config::{FitnessCriterion, GenomeConfig, InitialConnectionMode};
+use crate::fitness::FitnessScore;
 use crate::gene::{ConnectionKey, DefaultConnectionGene, DefaultNodeGene, NodeKey};
 use crate::graph::{creates_cycle, required_for_output};
 use crate::ids::GenomeId;
@@ -62,7 +63,8 @@ impl DefaultGenome {
             InitialConnectionMode::PartialDirect | InitialConnectionMode::Partial => {
                 self.connect_partial_direct(config, config.initial_connection.fraction.value(), rng)
             }
-        }
+        }?;
+        self.validate(config)
     }
 
     pub fn configure_new_with_innovation(
@@ -111,7 +113,8 @@ impl DefaultGenome {
                     tracker,
                     rng,
                 ),
-        }
+        }?;
+        self.validate(config)
     }
 
     pub fn configure_crossover(
@@ -158,7 +161,7 @@ impl DefaultGenome {
             }
         }
 
-        Ok(())
+        self.validate(config)
     }
 
     fn configure_crossover_by_innovation(
@@ -268,7 +271,7 @@ impl DefaultGenome {
             node.mutate(config, rng)?;
         }
 
-        Ok(())
+        self.validate(config)
     }
 
     pub fn mutate_with_innovation(
@@ -316,6 +319,95 @@ impl DefaultGenome {
         }
         for node in self.nodes.values_mut() {
             node.mutate(config, rng)?;
+        }
+
+        self.validate(config)
+    }
+
+    pub fn fitness_score(&self) -> Result<Option<FitnessScore>, GenomeError> {
+        self.fitness
+            .map(|value| {
+                FitnessScore::new(value).map_err(|_| GenomeError::InvalidFitness {
+                    genome_key: self.key,
+                    value,
+                })
+            })
+            .transpose()
+    }
+
+    pub fn set_fitness_score(&mut self, fitness: FitnessScore) {
+        self.fitness = Some(fitness.value());
+    }
+
+    pub fn validate(&self, config: &GenomeConfig) -> Result<(), GenomeError> {
+        let outputs: BTreeSet<NodeKey> = output_keys(config).into_iter().collect();
+        let inputs: BTreeSet<NodeKey> = input_keys(config).into_iter().collect();
+
+        for input_key in &inputs {
+            if self.nodes.contains_key(input_key) {
+                return Err(GenomeError::InputNodeStored {
+                    genome_key: self.key,
+                    node_key: *input_key,
+                });
+            }
+        }
+        for output_key in &outputs {
+            if !self.nodes.contains_key(output_key) {
+                return Err(GenomeError::MissingOutputNode {
+                    genome_key: self.key,
+                    node_key: *output_key,
+                });
+            }
+        }
+        if let Some(value) = self.fitness {
+            FitnessScore::new(value).map_err(|_| GenomeError::InvalidFitness {
+                genome_key: self.key,
+                value,
+            })?;
+        }
+
+        let mut enabled_connections = Vec::new();
+        for connection in self.connections.values() {
+            let key = connection.key;
+            if inputs.contains(&key.output) {
+                return Err(GenomeError::ConnectionIntoInputNode {
+                    genome_key: self.key,
+                    connection_key: key,
+                });
+            }
+            if !inputs.contains(&key.input) && !self.nodes.contains_key(&key.input) {
+                return Err(GenomeError::ConnectionFromUnknownNode {
+                    genome_key: self.key,
+                    connection_key: key,
+                    node_key: key.input,
+                });
+            }
+            if !self.nodes.contains_key(&key.output) {
+                return Err(GenomeError::ConnectionToUnknownNode {
+                    genome_key: self.key,
+                    connection_key: key,
+                    node_key: key.output,
+                });
+            }
+            if connection.enabled {
+                enabled_connections.push(key);
+            }
+        }
+
+        if config.feed_forward {
+            for key in &enabled_connections {
+                let others = enabled_connections
+                    .iter()
+                    .copied()
+                    .filter(|candidate| candidate != key)
+                    .collect::<Vec<_>>();
+                if creates_cycle(&others, *key) {
+                    return Err(GenomeError::FeedForwardCycle {
+                        genome_key: self.key,
+                        connection_key: *key,
+                    });
+                }
+            }
         }
 
         Ok(())

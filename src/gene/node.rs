@@ -149,6 +149,11 @@ impl DefaultNodeGene {
         distance += (self.iz_b - other.iz_b).abs();
         distance += (self.iz_c - other.iz_c).abs();
         distance += (self.iz_d - other.iz_d).abs();
+        if self.memory_gate_enabled != other.memory_gate_enabled {
+            distance += config.compatibility_enable_penalty;
+        }
+        distance += (self.memory_gate_bias - other.memory_gate_bias).abs();
+        distance += (self.memory_gate_response - other.memory_gate_response).abs();
         if self.activation != other.activation {
             distance += 1.0;
         }

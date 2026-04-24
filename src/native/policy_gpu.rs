@@ -58,6 +58,9 @@ pub enum NativePolicyGpuError {
         node_id: i64,
         aggregation: String,
     },
+    ConnectionGruUnsupported {
+        node_id: i64,
+    },
     BufferOverflow(&'static str),
     MissingRecurrentBuffer(&'static str),
     InputRowSizeMismatch {
@@ -103,6 +106,10 @@ impl fmt::Display for NativePolicyGpuError {
             } => write!(
                 f,
                 "native policy CUDA currently supports only sum aggregation; node {node_id} uses {aggregation}"
+            ),
+            Self::ConnectionGruUnsupported { node_id } => write!(
+                f,
+                "native policy CUDA does not support connection-GRU edges yet; node {node_id} uses one"
             ),
             Self::BufferOverflow(label) => write!(f, "{label} size overflow"),
             Self::MissingRecurrentBuffer(label) => {
@@ -398,6 +405,11 @@ mod imp {
                     aggregation: node.aggregation.as_str().to_string(),
                 });
             }
+            if node.incoming.iter().any(|edge| edge.connection_gru_enabled) {
+                return Err(NativePolicyGpuError::ConnectionGruUnsupported {
+                    node_id: node.node_id,
+                });
+            }
         }
         Ok(())
     }
@@ -425,7 +437,10 @@ mod imp {
                 let value = raw[(batch * node_count) + node_index] as f64;
                 node_values.insert(node.node_id.to_string(), value);
             }
-            snapshots.push(Some(CompiledPolicySnapshot { node_values }));
+            snapshots.push(Some(CompiledPolicySnapshot {
+                node_values,
+                ..CompiledPolicySnapshot::default()
+            }));
         }
         snapshots
     }

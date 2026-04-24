@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use crate::attributes::RandomSource;
 use crate::config::{Config, FitnessCriterion};
+use crate::fitness::FitnessScore;
 use crate::genome::DefaultGenome;
 use crate::ids::{GenomeId, SpeciesId};
 use crate::population::Population;
@@ -18,6 +19,7 @@ use crate::stagnation::is_better_fitness;
 #[derive(Debug, Clone, PartialEq)]
 pub enum PopulationFitnessSummaryError {
     FitnessNotAssigned(GenomeId),
+    InvalidFitness { genome_key: GenomeId, value: f64 },
     NoBestGenome,
 }
 
@@ -25,6 +27,9 @@ impl fmt::Display for PopulationFitnessSummaryError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::FitnessNotAssigned(key) => write!(f, "fitness not assigned to genome {key}"),
+            Self::InvalidFitness { genome_key, value } => {
+                write!(f, "genome {genome_key} has non-finite fitness {value}")
+            }
             Self::NoBestGenome => write!(f, "no best genome found"),
         }
     }
@@ -77,16 +82,24 @@ impl PopulationFitnessSummary {
         let mut values = Vec::new();
 
         for genome in population.values() {
-            let fitness =
+            let raw_fitness =
                 genome
                     .fitness
                     .ok_or(PopulationFitnessSummaryError::FitnessNotAssigned(
                         genome.key,
                     ))?;
-            values.push(fitness);
+            let fitness = FitnessScore::new(raw_fitness).map_err(|_| {
+                PopulationFitnessSummaryError::InvalidFitness {
+                    genome_key: genome.key,
+                    value: raw_fitness,
+                }
+            })?;
+            values.push(fitness.value());
             if best
                 .as_ref()
-                .map(|current| is_better_fitness(fitness, current.fitness.unwrap_or(0.0), config))
+                .map(|current| {
+                    is_better_fitness(fitness.value(), current.fitness.unwrap_or(0.0), config)
+                })
                 .unwrap_or(true)
             {
                 best = Some(genome.clone());

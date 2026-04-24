@@ -13,14 +13,18 @@ pub use crate::aggregation::{
     AggregationFunction, BUILTIN_AGGREGATIONS,
 };
 pub use crate::algorithm::{
-    ChoiceAttribute, DefaultGenome, FitnessError, FitnessResult, GenomeId, Population,
+    BatchEvaluator, BootstrapStrategy, ChoiceAttribute, DefaultGenome, FitnessError,
+    FitnessEvaluator, FitnessResult, FitnessScore, FitnessScoreError, GenomeId, Population,
     PopulationError, SpeciesId, XorShiftRng,
 };
 pub use crate::io::{
     export_neat_genome_json, load_neat_config, restore_rust_checkpoint, Config, ConfigError,
     Probability,
 };
-pub use crate::network::{FeedForwardNetwork, RecurrentNetwork};
+pub use crate::network::{
+    FeedForwardNetwork, RecurrentConnectionEval, RecurrentConnectionState, RecurrentNetwork,
+};
+#[cfg(feature = "policy-bridge")]
 pub use crate::runtime::{
     evaluate_policy_batch, AutoPolicyEvaluator, CompiledPolicyRequest, CompiledPolicyResult,
     CompiledPolicySnapshot, CompiledPolicySpec, CpuPolicyEvaluator, CudaNativePolicyEvaluator,
