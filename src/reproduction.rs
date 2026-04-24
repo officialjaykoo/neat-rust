@@ -6,14 +6,15 @@ use crate::attributes::RandomSource;
 use crate::config::{Config, SpeciesFitnessFunction};
 use crate::evolution::SpawnPlan;
 use crate::genome::{DefaultGenome, GenomeError};
+use crate::ids::GenomeId;
 use crate::innovation::InnovationTracker;
 use crate::species::{Species, SpeciesSet};
 use crate::stagnation::{species_fitness, DefaultStagnation};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReproductionState {
-    pub genome_indexer: i64,
-    pub ancestors: BTreeMap<i64, (Option<i64>, Option<i64>)>,
+    pub genome_indexer: GenomeId,
+    pub ancestors: BTreeMap<GenomeId, (Option<GenomeId>, Option<GenomeId>)>,
     pub innovation_tracker: InnovationTracker,
 }
 
@@ -27,7 +28,7 @@ pub enum ReproductionError {
 impl ReproductionState {
     pub fn new() -> Self {
         Self {
-            genome_indexer: 1,
+            genome_indexer: GenomeId::new(1),
             ancestors: BTreeMap::new(),
             innovation_tracker: InnovationTracker::new(),
         }
@@ -38,7 +39,7 @@ impl ReproductionState {
         config: &Config,
         num_genomes: usize,
         rng: &mut impl RandomSource,
-    ) -> Result<BTreeMap<i64, DefaultGenome>, ReproductionError> {
+    ) -> Result<BTreeMap<GenomeId, DefaultGenome>, ReproductionError> {
         let mut population = BTreeMap::new();
         for _ in 0..num_genomes {
             let key = self.next_genome_key();
@@ -61,7 +62,7 @@ impl ReproductionState {
         pop_size: usize,
         generation: usize,
         rng: &mut impl RandomSource,
-    ) -> Result<BTreeMap<i64, DefaultGenome>, ReproductionError> {
+    ) -> Result<BTreeMap<GenomeId, DefaultGenome>, ReproductionError> {
         self.innovation_tracker.reset_generation();
         let stagnation = DefaultStagnation::update(species_set, generation, config);
         let mut all_fitnesses = Vec::new();
@@ -144,9 +145,9 @@ impl ReproductionState {
         Ok(new_population)
     }
 
-    fn next_genome_key(&mut self) -> i64 {
+    fn next_genome_key(&mut self) -> GenomeId {
         let key = self.genome_indexer;
-        self.genome_indexer += 1;
+        self.genome_indexer = self.genome_indexer.next();
         key
     }
 }
@@ -321,8 +322,8 @@ fn adjust_fitnesses(species: &mut [Species], all_fitnesses: &[f64], config: &Con
     }
 }
 
-fn sorted_members(species: &Species, config: &Config) -> Vec<(i64, DefaultGenome)> {
-    let mut members: Vec<(i64, DefaultGenome)> = species
+fn sorted_members(species: &Species, config: &Config) -> Vec<(GenomeId, DefaultGenome)> {
+    let mut members: Vec<(GenomeId, DefaultGenome)> = species
         .members
         .iter()
         .map(|(key, genome)| (*key, genome.clone()))

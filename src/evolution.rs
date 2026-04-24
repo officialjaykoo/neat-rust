@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use crate::attributes::RandomSource;
 use crate::config::{Config, FitnessCriterion};
 use crate::genome::DefaultGenome;
+use crate::ids::{GenomeId, SpeciesId};
 use crate::population::Population;
 use crate::reporting::mean;
 use crate::reproduction::{
@@ -16,7 +17,7 @@ use crate::stagnation::is_better_fitness;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PopulationFitnessSummaryError {
-    FitnessNotAssigned(i64),
+    FitnessNotAssigned(GenomeId),
     NoBestGenome,
 }
 
@@ -69,7 +70,7 @@ pub struct PopulationFitnessSummary {
 
 impl PopulationFitnessSummary {
     pub fn from_population(
-        population: &BTreeMap<i64, DefaultGenome>,
+        population: &BTreeMap<GenomeId, DefaultGenome>,
         config: &Config,
     ) -> Result<Self, PopulationFitnessSummaryError> {
         let mut best: Option<DefaultGenome> = None;
@@ -105,7 +106,7 @@ impl PopulationFitnessSummary {
 
 pub fn sync_species_members(
     species_set: &mut SpeciesSet,
-    population: &BTreeMap<i64, DefaultGenome>,
+    population: &BTreeMap<GenomeId, DefaultGenome>,
 ) {
     for species in species_set.species.values_mut() {
         for (key, member) in species.members.iter_mut() {
@@ -118,35 +119,35 @@ pub fn sync_species_members(
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpeciesAssignment {
-    pub representative_id: i64,
-    pub member_ids: Vec<i64>,
+    pub representative_id: GenomeId,
+    pub member_ids: Vec<GenomeId>,
 }
 
 impl SpeciesAssignment {
-    pub fn staged(representative_id: i64) -> Self {
+    pub fn staged(representative_id: impl Into<GenomeId>) -> Self {
         Self {
-            representative_id,
+            representative_id: representative_id.into(),
             member_ids: Vec::new(),
         }
     }
 
-    pub fn add_member(&mut self, genome_id: i64) {
-        self.member_ids.push(genome_id);
+    pub fn add_member(&mut self, genome_id: impl Into<GenomeId>) {
+        self.member_ids.push(genome_id.into());
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpawnPlanEntry {
-    pub species_key: i64,
+    pub species_key: SpeciesId,
     pub spawn_quota: usize,
-    pub parent_pool: Vec<(i64, DefaultGenome)>,
+    pub parent_pool: Vec<(GenomeId, DefaultGenome)>,
 }
 
 impl SpawnPlanEntry {
     pub fn choose_parent<'a>(
         &'a self,
         rng: &mut impl RandomSource,
-    ) -> Result<(&'a i64, &'a DefaultGenome), ReproductionError> {
+    ) -> Result<(&'a GenomeId, &'a DefaultGenome), ReproductionError> {
         let index = rng
             .next_index(self.parent_pool.len())
             .ok_or(ReproductionError::EmptySpecies)?;
@@ -203,7 +204,7 @@ impl SpawnPlan {
         Ok(Self { entries })
     }
 
-    pub fn entry(&self, species_key: i64) -> Option<&SpawnPlanEntry> {
+    pub fn entry(&self, species_key: SpeciesId) -> Option<&SpawnPlanEntry> {
         self.entries
             .iter()
             .find(|entry| entry.species_key == species_key)
@@ -211,9 +212,9 @@ impl SpawnPlan {
 
     pub fn choose_interspecies_parent<'a>(
         &'a self,
-        current_species: i64,
+        current_species: SpeciesId,
         rng: &mut impl RandomSource,
-    ) -> Result<Option<(&'a i64, &'a DefaultGenome)>, ReproductionError> {
+    ) -> Result<Option<(&'a GenomeId, &'a DefaultGenome)>, ReproductionError> {
         let other_entries: Vec<&SpawnPlanEntry> = self
             .entries
             .iter()
@@ -229,7 +230,7 @@ impl SpawnPlan {
 fn build_parent_pools(
     species: &[Species],
     config: &Config,
-) -> BTreeMap<i64, Vec<(i64, DefaultGenome)>> {
+) -> BTreeMap<SpeciesId, Vec<(GenomeId, DefaultGenome)>> {
     species
         .iter()
         .map(|species| {
@@ -243,8 +244,8 @@ fn build_parent_pools(
         .collect()
 }
 
-fn sorted_members(species: &Species, config: &Config) -> Vec<(i64, DefaultGenome)> {
-    let mut members: Vec<(i64, DefaultGenome)> = species
+fn sorted_members(species: &Species, config: &Config) -> Vec<(GenomeId, DefaultGenome)> {
+    let mut members: Vec<(GenomeId, DefaultGenome)> = species
         .members
         .iter()
         .map(|(key, genome)| (*key, genome.clone()))

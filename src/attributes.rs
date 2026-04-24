@@ -146,27 +146,24 @@ impl FloatAttribute {
         rng: &mut impl RandomSource,
     ) -> Result<f64, AttributeError> {
         Self::validate(config)?;
-        let init_type = config.init_type.trim().to_ascii_lowercase();
-        if init_type.contains("gauss") || init_type.contains("normal") {
-            return Ok(Self::clamp(
+        match &config.init_type {
+            crate::config::FloatInitType::Gaussian => Ok(Self::clamp(
                 rng.next_gaussian(config.init_mean, config.init_stdev),
                 config,
-            ));
+            )),
+            crate::config::FloatInitType::Uniform => {
+                let min_value = config
+                    .min_value
+                    .max(config.init_mean - (2.0 * config.init_stdev));
+                let max_value = config
+                    .max_value
+                    .min(config.init_mean + (2.0 * config.init_stdev));
+                Ok(rng.next_uniform(min_value, max_value))
+            }
+            crate::config::FloatInitType::Other(value) => {
+                Err(AttributeError::UnknownFloatInitType(value.clone()))
+            }
         }
-
-        if init_type.contains("uniform") {
-            let min_value = config
-                .min_value
-                .max(config.init_mean - (2.0 * config.init_stdev));
-            let max_value = config
-                .max_value
-                .min(config.init_mean + (2.0 * config.init_stdev));
-            return Ok(rng.next_uniform(min_value, max_value));
-        }
-
-        Err(AttributeError::UnknownFloatInitType(
-            config.init_type.clone(),
-        ))
     }
 
     pub fn mutate_value(

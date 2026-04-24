@@ -3,23 +3,24 @@ use std::collections::BTreeMap;
 use crate::config::Config;
 use crate::evolution::SpeciesAssignment;
 use crate::genome::{DefaultGenome, GenomeError};
+use crate::ids::{GenomeId, SpeciesId};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Species {
-    pub key: i64,
+    pub key: SpeciesId,
     pub created: usize,
     pub last_improved: usize,
     pub representative: Option<DefaultGenome>,
-    pub members: BTreeMap<i64, DefaultGenome>,
+    pub members: BTreeMap<GenomeId, DefaultGenome>,
     pub fitness: Option<f64>,
     pub adjusted_fitness: Option<f64>,
     pub fitness_history: Vec<f64>,
 }
 
 impl Species {
-    pub fn new(key: i64, generation: usize) -> Self {
+    pub fn new(key: impl Into<SpeciesId>, generation: usize) -> Self {
         Self {
-            key,
+            key: key.into(),
             created: generation,
             last_improved: generation,
             representative: None,
@@ -30,7 +31,11 @@ impl Species {
         }
     }
 
-    pub fn update(&mut self, representative: DefaultGenome, members: BTreeMap<i64, DefaultGenome>) {
+    pub fn update(
+        &mut self,
+        representative: DefaultGenome,
+        members: BTreeMap<GenomeId, DefaultGenome>,
+    ) {
         self.representative = Some(representative);
         self.members = members;
     }
@@ -45,7 +50,7 @@ impl Species {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct GenomeDistanceCache<'a> {
-    pub distances: BTreeMap<(i64, i64), f64>,
+    pub distances: BTreeMap<(GenomeId, GenomeId), f64>,
     pub hits: usize,
     pub misses: usize,
     config: &'a Config,
@@ -81,10 +86,10 @@ impl<'a> GenomeDistanceCache<'a> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpeciesSet {
-    pub species: BTreeMap<i64, Species>,
-    pub genome_to_species: BTreeMap<i64, i64>,
+    pub species: BTreeMap<SpeciesId, Species>,
+    pub genome_to_species: BTreeMap<GenomeId, SpeciesId>,
     pub compatibility_threshold: Option<f64>,
-    next_species_key: i64,
+    next_species_key: SpeciesId,
 }
 
 impl SpeciesSet {
@@ -93,33 +98,34 @@ impl SpeciesSet {
             species: BTreeMap::new(),
             genome_to_species: BTreeMap::new(),
             compatibility_threshold: None,
-            next_species_key: 1,
+            next_species_key: SpeciesId::new(1),
         }
     }
 
     pub fn from_parts(
-        species: BTreeMap<i64, Species>,
-        genome_to_species: BTreeMap<i64, i64>,
-        next_species_key: i64,
+        species: BTreeMap<SpeciesId, Species>,
+        genome_to_species: BTreeMap<GenomeId, SpeciesId>,
+        next_species_key: SpeciesId,
         compatibility_threshold: Option<f64>,
     ) -> Self {
         Self {
             species,
             genome_to_species,
             compatibility_threshold,
-            next_species_key: next_species_key.max(1),
+            next_species_key: SpeciesId::new(next_species_key.raw().max(1)),
         }
     }
 
-    pub fn next_species_key(&self) -> i64 {
+    pub fn next_species_key(&self) -> SpeciesId {
         self.next_species_key
     }
 
-    pub fn get_species_id(&self, individual_id: i64) -> Option<i64> {
+    pub fn get_species_id(&self, individual_id: impl Into<GenomeId>) -> Option<SpeciesId> {
+        let individual_id = individual_id.into();
         self.genome_to_species.get(&individual_id).copied()
     }
 
-    pub fn get_species(&self, individual_id: i64) -> Option<&Species> {
+    pub fn get_species(&self, individual_id: impl Into<GenomeId>) -> Option<&Species> {
         self.get_species_id(individual_id)
             .and_then(|species_id| self.species.get(&species_id))
     }
@@ -127,16 +133,16 @@ impl SpeciesSet {
     pub fn speciate(
         &mut self,
         config: &Config,
-        population: &BTreeMap<i64, DefaultGenome>,
+        population: &BTreeMap<GenomeId, DefaultGenome>,
         generation: usize,
     ) -> Result<(), GenomeError> {
         let compatibility_threshold = self
             .compatibility_threshold
             .unwrap_or(config.species_set.compatibility_threshold);
         self.compatibility_threshold = Some(compatibility_threshold);
-        let mut unspeciated: Vec<i64> = population.keys().copied().collect();
+        let mut unspeciated: Vec<GenomeId> = population.keys().copied().collect();
         let mut distances = GenomeDistanceCache::new(config);
-        let mut assignments: BTreeMap<i64, SpeciesAssignment> = BTreeMap::new();
+        let mut assignments: BTreeMap<SpeciesId, SpeciesAssignment> = BTreeMap::new();
 
         for (species_id, species) in &self.species {
             let Some(representative) = &species.representative else {
@@ -174,7 +180,7 @@ impl SpeciesSet {
                 species_id
             } else {
                 let species_id = self.next_species_key;
-                self.next_species_key += 1;
+                self.next_species_key = self.next_species_key.next();
                 assignments.insert(species_id, SpeciesAssignment::staged(genome_id));
                 self.species
                     .entry(species_id)
@@ -238,7 +244,7 @@ impl Default for SpeciesSet {
     }
 }
 
-fn normalized_distance_key(left: i64, right: i64) -> (i64, i64) {
+fn normalized_distance_key(left: GenomeId, right: GenomeId) -> (GenomeId, GenomeId) {
     if left <= right {
         (left, right)
     } else {

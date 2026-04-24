@@ -174,7 +174,8 @@ impl Ctrnn {
                 continue;
             }
 
-            let (input_node, output_node) = connection_gene.key;
+            let input_node = connection_gene.key.input;
+            let output_node = connection_gene.key.output;
             if !required.contains(&output_node) && !required.contains(&input_node) {
                 continue;
             }
@@ -191,23 +192,12 @@ impl Ctrnn {
                 .nodes
                 .get(&node_key)
                 .ok_or(CtrnnError::MissingNodeGene(node_key))?;
-            let aggregation =
-                AggregationFunction::from_name(&node_gene.aggregation).ok_or_else(|| {
-                    CtrnnError::UnknownAggregation(AggregationError::unknown(
-                        &node_gene.aggregation,
-                    ))
-                })?;
-            let activation =
-                ActivationFunction::from_name(&node_gene.activation).ok_or_else(|| {
-                    CtrnnError::UnknownActivation(ActivationError::unknown(&node_gene.activation))
-                })?;
-
             node_evals.insert(
                 node_key,
                 CtrnnNodeEval {
                     time_constant: node_gene.time_constant,
-                    activation,
-                    aggregation,
+                    activation: node_gene.activation,
+                    aggregation: node_gene.aggregation,
                     bias: node_gene.bias,
                     response: node_gene.response,
                     links,

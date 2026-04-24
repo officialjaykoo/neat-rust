@@ -6,16 +6,25 @@ $repoRoot = Split-Path -Parent $root
 $cargoHome = Join-Path $repoRoot '.tools\cargo'
 $rustupHome = Join-Path $repoRoot '.tools\rustup'
 $llvmMingw = Join-Path $repoRoot '.tools\llvm-mingw\bin'
+$localCargo = Join-Path $cargoHome 'bin\cargo.exe'
+$localClang = Join-Path $llvmMingw 'x86_64-w64-mingw32-clang.exe'
 
-if (-not (Test-Path (Join-Path $cargoHome 'bin\cargo.exe'))) {
-  throw 'cargo.exe not found. Expected local Rust under .tools\cargo.'
+if ((Test-Path $localCargo) -and (Test-Path $localClang)) {
+  $env:CARGO_HOME = $cargoHome
+  $env:RUSTUP_HOME = $rustupHome
+  $env:PATH = "$($cargoHome)\bin;$llvmMingw;$env:PATH"
+
+  & $localCargo @args
+  exit $LASTEXITCODE
 }
-if (-not (Test-Path (Join-Path $llvmMingw 'x86_64-w64-mingw32-clang.exe'))) {
-  throw 'llvm-mingw linker not found. Expected it under .tools\llvm-mingw\bin.'
+
+$cargoCmd = Get-Command cargo -ErrorAction SilentlyContinue
+if (-not $cargoCmd) {
+  throw 'cargo executable not found. Install Rust or place portable toolchain under .tools\cargo.'
 }
 
-$env:CARGO_HOME = $cargoHome
-$env:RUSTUP_HOME = $rustupHome
-$env:PATH = "$($cargoHome)\bin;$llvmMingw;$env:PATH"
+if (Test-Path $llvmMingw) {
+  $env:PATH = "$llvmMingw;$env:PATH"
+}
 
-& (Join-Path $cargoHome 'bin\cargo.exe') @args
+& $cargoCmd.Source @args

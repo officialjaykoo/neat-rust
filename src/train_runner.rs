@@ -21,6 +21,7 @@ use crate::{
         genomes::DefaultGenome,
         reporting::{mean, stdev},
     },
+    ids::GenomeId,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -227,20 +228,20 @@ pub struct TrainRunSummary {
     pub output_dir: PathBuf,
     pub winner_path: PathBuf,
     pub generations_requested: usize,
-    pub best_genome_key: Option<i64>,
+    pub best_genome_key: Option<GenomeId>,
     pub best_fitness: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct EvalJob {
     generation: usize,
-    genome_id: i64,
+    genome_id: GenomeId,
     genome_path: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 struct EvalJobResult {
-    genome_id: i64,
+    genome_id: GenomeId,
     fitness: f64,
     win_rate: Option<f64>,
     mean_gold_delta: Option<f64>,
@@ -261,7 +262,7 @@ struct EvalJobResult {
 
 #[derive(Debug, Clone, PartialEq)]
 struct PlayoffSummary {
-    winner_key: i64,
+    winner_key: GenomeId,
     path: PathBuf,
     results: Vec<EvalJobResult>,
 }
@@ -274,7 +275,7 @@ pub enum TrainRunnerError {
     Checkpoint(CheckpointError),
     Population(PopulationError),
     Eval(EvalBridgeError),
-    MissingFitness(i64),
+    MissingFitness(GenomeId),
     NoWinner,
 }
 
@@ -472,7 +473,7 @@ pub fn run_kflower_training(
 
 fn evaluate_generation(
     generation: usize,
-    genomes: &mut BTreeMap<i64, DefaultGenome>,
+    genomes: &mut BTreeMap<GenomeId, DefaultGenome>,
     config: &Config,
     runtime: &TrainRuntimeConfig,
     feature_profile: &str,
@@ -705,8 +706,8 @@ fn run_eval_job(
 }
 
 fn update_playoff_candidates(
-    candidates: &mut BTreeMap<i64, DefaultGenome>,
-    genomes: &BTreeMap<i64, DefaultGenome>,
+    candidates: &mut BTreeMap<GenomeId, DefaultGenome>,
+    genomes: &BTreeMap<GenomeId, DefaultGenome>,
     config: &Config,
     topk: usize,
 ) {
@@ -727,7 +728,7 @@ fn update_playoff_candidates(
 }
 
 fn run_winner_playoff(
-    candidates: &BTreeMap<i64, DefaultGenome>,
+    candidates: &BTreeMap<GenomeId, DefaultGenome>,
     config: &Config,
     runtime: &TrainRuntimeConfig,
     feature_profile: &str,
@@ -801,7 +802,10 @@ fn sort_genomes_by_fitness(genomes: &mut [DefaultGenome], config: &Config) {
     });
 }
 
-fn select_playoff_winner(results: &[EvalJobResult], runtime: &TrainRuntimeConfig) -> Option<i64> {
+fn select_playoff_winner(
+    results: &[EvalJobResult],
+    runtime: &TrainRuntimeConfig,
+) -> Option<GenomeId> {
     let mut best = results.first()?;
     for result in &results[1..] {
         if playoff_result_is_better(result, best, runtime) {
@@ -864,7 +868,7 @@ fn playoff_result_is_better(
 
 fn write_winner_playoff(
     output_dir: &Path,
-    winner_key: i64,
+    winner_key: GenomeId,
     results: &[EvalJobResult],
     runtime: &TrainRuntimeConfig,
 ) -> Result<PathBuf, TrainRunnerError> {
@@ -912,7 +916,7 @@ fn playoff_result_json(result: &EvalJobResult) -> String {
 
 fn generation_metrics_line(
     generation: usize,
-    genomes: &BTreeMap<i64, DefaultGenome>,
+    genomes: &BTreeMap<GenomeId, DefaultGenome>,
     results: &[EvalJobResult],
     requested_games: usize,
 ) -> Result<String, TrainRunnerError> {
@@ -987,7 +991,7 @@ fn generation_metrics_line(
         } else {
             "invalid_generation"
         },
-        best_key.unwrap_or(-1),
+        best_key.map(|key| key.raw()).unwrap_or(-1),
         json_number(best_fitness),
         json_number(mean(&fitness_values)),
         json_number(stdev(&fitness_values)),
@@ -1016,7 +1020,7 @@ fn write_run_summary(
     feature_profile: &str,
     playoff: Option<&PlayoffSummary>,
     generations_requested: usize,
-    winner_key: i64,
+    winner_key: GenomeId,
     best_fitness: Option<f64>,
 ) -> Result<(), TrainRunnerError> {
     let path = output_dir.join("run_summary.json");
@@ -1046,7 +1050,7 @@ fn write_run_summary(
 fn write_winner_lineage(
     output_dir: &Path,
     population: &Population,
-    winner_key: i64,
+    winner_key: GenomeId,
 ) -> Result<Option<PathBuf>, TrainRunnerError> {
     let path = output_dir.join("winner_lineage.json");
     let mut entries = Vec::new();
@@ -1067,8 +1071,8 @@ fn write_winner_lineage(
             "{{\"genome_key\":{},\"depth\":{},\"parent1\":{},\"parent2\":{}}}",
             key,
             depth,
-            json_option_i64(parents.0),
-            json_option_i64(parents.1)
+            json_option_genome_id(parents.0),
+            json_option_genome_id(parents.1)
         ));
         if let Some(parent) = parents.0 {
             stack.push((parent, depth + 1));
@@ -1413,7 +1417,7 @@ fn json_option_quantile(values: &[f64], q: f64) -> String {
     json_number(sorted[index.min(sorted.len() - 1)])
 }
 
-fn json_option_i64(value: Option<i64>) -> String {
+fn json_option_genome_id(value: Option<GenomeId>) -> String {
     value
         .map(|number| number.to_string())
         .unwrap_or_else(|| "null".to_string())

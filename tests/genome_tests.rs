@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use neat_rust::{
-    CompatibilityExcessCoefficient, Config, DefaultConnectionGene, DefaultGenome, DefaultNodeGene,
-    FitnessCriterion, InitialConnection, RandomSource, XorShiftRng,
+    CompatibilityExcessCoefficient, Config, ConnectionKey, DefaultConnectionGene, DefaultGenome,
+    DefaultNodeGene, FitnessCriterion, InitialConnection, RandomSource, XorShiftRng,
 };
 
 #[derive(Debug, Clone)]
@@ -29,9 +29,16 @@ impl RandomSource for SequenceRng {
 }
 
 fn repo_path(relative: &str) -> PathBuf {
+    let relative = relative.strip_prefix("scripts/configs/").unwrap_or(relative);
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
+        .join("tests")
+        .join("fixtures")
+        .join("configs")
         .join(relative)
+}
+
+fn key(input: i64, output: i64) -> ConnectionKey {
+    ConnectionKey::new(input, output)
 }
 
 #[test]
@@ -47,9 +54,9 @@ fn creates_full_direct_memory8_recurrent_genome() {
 
     assert_eq!(genome.nodes.len(), 2);
     assert_eq!(genome.connections.len(), 18);
-    assert!(genome.connections.contains_key(&(-1, 0)));
-    assert!(genome.connections.contains_key(&(0, 0)));
-    assert!(genome.connections.contains_key(&(1, 1)));
+    assert!(genome.connections.contains_key(&key(-1, 0)));
+    assert!(genome.connections.contains_key(&key(0, 0)));
+    assert!(genome.connections.contains_key(&key(1, 1)));
 }
 
 #[test]
@@ -69,7 +76,7 @@ fn creates_partial_direct_feedforward_genome() {
     assert!(genome
         .connections
         .keys()
-        .all(|(input, output)| *input < 0 && *output >= 0));
+        .all(|key| key.input < 0 && key.output >= 0));
 }
 
 #[test]
@@ -81,7 +88,7 @@ fn mutate_add_node_keeps_split_connection_neutral() {
     genome.nodes.insert(1, DefaultNodeGene::new(1));
     genome
         .connections
-        .insert((-1, 0), connection(-1, 0, 1, 2.5, true));
+        .insert(key(-1, 0), connection(-1, 0, 1, 2.5, true));
     let mut rng = SequenceRng::new(&[0.0; 64]);
 
     let new_node = genome
@@ -91,11 +98,11 @@ fn mutate_add_node_keeps_split_connection_neutral() {
 
     assert_eq!(new_node, 2);
     assert_eq!(genome.nodes[&2].bias, 0.0);
-    assert!(!genome.connections[&(-1, 0)].enabled);
-    assert_eq!(genome.connections[&(-1, 2)].weight, 1.0);
-    assert!(genome.connections[&(-1, 2)].enabled);
-    assert_eq!(genome.connections[&(2, 0)].weight, 2.5);
-    assert!(genome.connections[&(2, 0)].enabled);
+    assert!(!genome.connections[&key(-1, 0)].enabled);
+    assert_eq!(genome.connections[&key(-1, 2)].weight, 1.0);
+    assert!(genome.connections[&key(-1, 2)].enabled);
+    assert_eq!(genome.connections[&key(2, 0)].weight, 2.5);
+    assert!(genome.connections[&key(2, 0)].enabled);
 }
 
 #[test]
@@ -108,12 +115,12 @@ fn prune_dangling_nodes_removes_hidden_nodes_that_cannot_reach_outputs() {
     genome.nodes.insert(2, DefaultNodeGene::new(2));
     genome
         .connections
-        .insert((-1, 2), connection(-1, 2, 1, 1.0, true));
+        .insert(key(-1, 2), connection(-1, 2, 1, 1.0, true));
 
     genome.prune_dangling_nodes(&config.genome);
 
     assert!(!genome.nodes.contains_key(&2));
-    assert!(!genome.connections.contains_key(&(-1, 2)));
+    assert!(!genome.connections.contains_key(&key(-1, 2)));
     assert!(genome.nodes.contains_key(&0));
     assert!(genome.nodes.contains_key(&1));
 }
@@ -129,14 +136,14 @@ fn crossover_honors_min_fitness_direction_for_excess_genes() {
     high_fitness_parent.nodes.insert(1, DefaultNodeGene::new(1));
     high_fitness_parent
         .connections
-        .insert((-1, 0), connection(-1, 0, 1, 1.0, true));
+        .insert(key(-1, 0), connection(-1, 0, 1, 1.0, true));
     let mut low_fitness_parent = DefaultGenome::new(2);
     low_fitness_parent.fitness = Some(1.0);
     low_fitness_parent.nodes.insert(0, DefaultNodeGene::new(0));
     low_fitness_parent.nodes.insert(1, DefaultNodeGene::new(1));
     low_fitness_parent
         .connections
-        .insert((-2, 0), connection(-2, 0, 2, 2.0, true));
+        .insert(key(-2, 0), connection(-2, 0, 2, 2.0, true));
     let mut rng = XorShiftRng::seed_from_u64(11);
     let mut child = DefaultGenome::new(3);
 
@@ -150,8 +157,8 @@ fn crossover_honors_min_fitness_direction_for_excess_genes() {
         )
         .expect("crossover should work");
 
-    assert!(child.connections.contains_key(&(-2, 0)));
-    assert!(!child.connections.contains_key(&(-1, 0)));
+    assert!(child.connections.contains_key(&key(-2, 0)));
+    assert!(!child.connections.contains_key(&key(-1, 0)));
 }
 
 #[test]
@@ -167,20 +174,20 @@ fn distance_uses_neat_python_21_innovation_excess_and_enable_penalty() {
     let mut left = DefaultGenome::new(1);
     let mut right = DefaultGenome::new(2);
     left.connections
-        .insert((-1, 0), connection(-1, 0, 1, 0.0, true));
+        .insert(key(-1, 0), connection(-1, 0, 1, 0.0, true));
     left.connections
-        .insert((-2, 0), connection(-2, 0, 3, 0.0, true));
+        .insert(key(-2, 0), connection(-2, 0, 3, 0.0, true));
     left.connections
-        .insert((-3, 0), connection(-3, 0, 5, 0.0, true));
+        .insert(key(-3, 0), connection(-3, 0, 5, 0.0, true));
     right
         .connections
-        .insert((-1, 0), connection(-1, 0, 1, 1.0, false));
+        .insert(key(-1, 0), connection(-1, 0, 1, 1.0, false));
     right
         .connections
-        .insert((-4, 0), connection(-4, 0, 2, 0.0, true));
+        .insert(key(-4, 0), connection(-4, 0, 2, 0.0, true));
     right
         .connections
-        .insert((-5, 0), connection(-5, 0, 4, 0.0, true));
+        .insert(key(-5, 0), connection(-5, 0, 4, 0.0, true));
 
     let distance = left
         .distance(&right, &config.genome)
@@ -196,7 +203,7 @@ fn connection(
     weight: f64,
     enabled: bool,
 ) -> DefaultConnectionGene {
-    let mut connection = DefaultConnectionGene::with_innovation((input, output), innovation);
+    let mut connection = DefaultConnectionGene::with_innovation(key(input, output), innovation);
     connection.weight = weight;
     connection.enabled = enabled;
     connection

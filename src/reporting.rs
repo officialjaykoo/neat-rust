@@ -3,6 +3,7 @@ use std::time::Instant;
 
 use crate::config::Config;
 use crate::genome::DefaultGenome;
+use crate::ids::{GenomeId, SpeciesId};
 use crate::species::{Species, SpeciesSet};
 
 pub trait Reporter {
@@ -11,7 +12,7 @@ pub trait Reporter {
     fn end_generation(
         &mut self,
         _config: &Config,
-        _population: &BTreeMap<i64, DefaultGenome>,
+        _population: &BTreeMap<GenomeId, DefaultGenome>,
         _species_set: &SpeciesSet,
     ) {
     }
@@ -19,7 +20,7 @@ pub trait Reporter {
     fn post_evaluate(
         &mut self,
         _config: &Config,
-        _population: &BTreeMap<i64, DefaultGenome>,
+        _population: &BTreeMap<GenomeId, DefaultGenome>,
         _species: &SpeciesSet,
         _best_genome: &DefaultGenome,
     ) {
@@ -28,7 +29,7 @@ pub trait Reporter {
     fn post_reproduction(
         &mut self,
         _config: &Config,
-        _population: &BTreeMap<i64, DefaultGenome>,
+        _population: &BTreeMap<GenomeId, DefaultGenome>,
         _species: &SpeciesSet,
     ) {
     }
@@ -37,7 +38,7 @@ pub trait Reporter {
 
     fn found_solution(&mut self, _config: &Config, _generation: usize, _best: &DefaultGenome) {}
 
-    fn species_stagnant(&mut self, _species_id: i64, _species: &Species) {}
+    fn species_stagnant(&mut self, _species_id: SpeciesId, _species: &Species) {}
 
     fn info(&mut self, _message: &str) {}
 }
@@ -71,7 +72,7 @@ impl ReporterSet {
     pub fn end_generation(
         &mut self,
         config: &Config,
-        population: &BTreeMap<i64, DefaultGenome>,
+        population: &BTreeMap<GenomeId, DefaultGenome>,
         species_set: &SpeciesSet,
     ) {
         for reporter in &mut self.reporters {
@@ -82,7 +83,7 @@ impl ReporterSet {
     pub fn post_evaluate(
         &mut self,
         config: &Config,
-        population: &BTreeMap<i64, DefaultGenome>,
+        population: &BTreeMap<GenomeId, DefaultGenome>,
         species: &SpeciesSet,
         best_genome: &DefaultGenome,
     ) {
@@ -94,7 +95,7 @@ impl ReporterSet {
     pub fn post_reproduction(
         &mut self,
         config: &Config,
-        population: &BTreeMap<i64, DefaultGenome>,
+        population: &BTreeMap<GenomeId, DefaultGenome>,
         species: &SpeciesSet,
     ) {
         for reporter in &mut self.reporters {
@@ -114,7 +115,7 @@ impl ReporterSet {
         }
     }
 
-    pub fn species_stagnant(&mut self, species_id: i64, species: &Species) {
+    pub fn species_stagnant(&mut self, species_id: SpeciesId, species: &Species) {
         for reporter in &mut self.reporters {
             reporter.species_stagnant(species_id, species);
         }
@@ -160,7 +161,7 @@ impl Reporter for StdOutReporter {
     fn end_generation(
         &mut self,
         _config: &Config,
-        _population: &BTreeMap<i64, DefaultGenome>,
+        _population: &BTreeMap<GenomeId, DefaultGenome>,
         _species_set: &SpeciesSet,
     ) {
         let elapsed = self
@@ -184,7 +185,7 @@ impl Reporter for StdOutReporter {
     fn post_evaluate(
         &mut self,
         _config: &Config,
-        population: &BTreeMap<i64, DefaultGenome>,
+        population: &BTreeMap<GenomeId, DefaultGenome>,
         species: &SpeciesSet,
         best_genome: &DefaultGenome,
     ) {
@@ -242,7 +243,7 @@ impl Reporter for StdOutReporter {
         );
     }
 
-    fn species_stagnant(&mut self, species_id: i64, species: &Species) {
+    fn species_stagnant(&mut self, species_id: SpeciesId, species: &Species) {
         if self.show_species_detail {
             println!(
                 "Species {} with {} members is stagnated: removing it",

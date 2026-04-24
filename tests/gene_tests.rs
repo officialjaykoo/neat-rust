@@ -1,6 +1,9 @@
 use std::path::PathBuf;
 
-use neat_rust::{Config, DefaultConnectionGene, DefaultNodeGene, GenomeConfig, RandomSource};
+use neat_rust::{
+    ActivationFunction, AggregationFunction, Config, ConnectionKey, DefaultConnectionGene,
+    DefaultNodeGene, GenomeConfig, RandomSource,
+};
 
 #[derive(Debug, Clone)]
 struct SequenceRng {
@@ -29,9 +32,16 @@ impl RandomSource for SequenceRng {
 }
 
 fn repo_path(relative: &str) -> PathBuf {
+    let relative = relative.strip_prefix("scripts/configs/").unwrap_or(relative);
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
+        .join("tests")
+        .join("fixtures")
+        .join("configs")
         .join(relative)
+}
+
+fn key(input: i64, output: i64) -> ConnectionKey {
+    ConnectionKey::new(input, output)
 }
 
 fn memory8_genome_config() -> GenomeConfig {
@@ -54,8 +64,8 @@ fn initializes_node_gene_from_config() {
         DefaultNodeGene::initialized(0, &config, &mut rng).expect("node gene should initialize");
 
     assert_eq!(gene.key, 0);
-    assert_eq!(gene.activation, "tanh");
-    assert_eq!(gene.aggregation, "sum");
+    assert_eq!(gene.activation, ActivationFunction::Tanh);
+    assert_eq!(gene.aggregation, AggregationFunction::Sum);
     assert_eq!(gene.response, 1.0);
     assert_eq!(gene.time_constant, 1.0);
     assert_eq!(gene.iz_a, 0.02);
@@ -78,10 +88,10 @@ fn initializes_connection_gene_from_config() {
     let config = memory8_genome_config();
     let mut rng = SequenceRng::new(&[0.5, 0.0]);
 
-    let gene = DefaultConnectionGene::initialized((-1, 0), &config, &mut rng)
+    let gene = DefaultConnectionGene::initialized(key(-1, 0), &config, &mut rng)
         .expect("connection gene should initialize");
 
-    assert_eq!(gene.key, (-1, 0));
+    assert_eq!(gene.key, key(-1, 0));
     assert!(gene.weight >= config.weight.min_value && gene.weight <= config.weight.max_value);
     assert!(gene.enabled);
 }
@@ -92,8 +102,8 @@ fn node_gene_crossover_inherits_each_attribute_independently() {
         key: 1,
         bias: 1.0,
         response: 2.0,
-        activation: "tanh".to_string(),
-        aggregation: "sum".to_string(),
+        activation: ActivationFunction::Tanh,
+        aggregation: AggregationFunction::Sum,
         time_constant: 1.0,
         iz_a: 0.02,
         iz_b: 0.20,
@@ -107,8 +117,8 @@ fn node_gene_crossover_inherits_each_attribute_independently() {
         key: 1,
         bias: -1.0,
         response: -2.0,
-        activation: "relu".to_string(),
-        aggregation: "max".to_string(),
+        activation: ActivationFunction::Relu,
+        aggregation: AggregationFunction::Max,
         time_constant: 2.0,
         iz_a: 0.10,
         iz_b: 0.25,
@@ -126,8 +136,8 @@ fn node_gene_crossover_inherits_each_attribute_independently() {
 
     assert_eq!(child.bias, 1.0);
     assert_eq!(child.response, -2.0);
-    assert_eq!(child.activation, "tanh");
-    assert_eq!(child.aggregation, "max");
+    assert_eq!(child.activation, ActivationFunction::Tanh);
+    assert_eq!(child.aggregation, AggregationFunction::Max);
     assert_eq!(child.time_constant, 1.0);
     assert_eq!(child.iz_a, 0.10);
     assert_eq!(child.iz_b, 0.20);
@@ -141,13 +151,13 @@ fn node_gene_crossover_inherits_each_attribute_independently() {
 #[test]
 fn connection_gene_crossover_applies_disable_rule() {
     let left = DefaultConnectionGene {
-        key: (-1, 0),
+        key: key(-1, 0),
         innovation: None,
         weight: 1.5,
         enabled: true,
     };
     let right = DefaultConnectionGene {
-        key: (-1, 0),
+        key: key(-1, 0),
         innovation: None,
         weight: -1.5,
         enabled: false,
@@ -169,8 +179,8 @@ fn gene_distance_uses_config_weight_coefficient() {
         key: 0,
         bias: 1.0,
         response: 1.0,
-        activation: "tanh".to_string(),
-        aggregation: "sum".to_string(),
+        activation: ActivationFunction::Tanh,
+        aggregation: AggregationFunction::Sum,
         time_constant: 1.0,
         iz_a: 0.02,
         iz_b: 0.20,
@@ -184,8 +194,8 @@ fn gene_distance_uses_config_weight_coefficient() {
         key: 0,
         bias: 2.0,
         response: 3.0,
-        activation: "relu".to_string(),
-        aggregation: "sum".to_string(),
+        activation: ActivationFunction::Relu,
+        aggregation: AggregationFunction::Sum,
         time_constant: 1.0,
         iz_a: 0.02,
         iz_b: 0.20,
@@ -196,13 +206,13 @@ fn gene_distance_uses_config_weight_coefficient() {
         memory_gate_response: 1.0,
     };
     let conn_left = DefaultConnectionGene {
-        key: (-1, 0),
+        key: key(-1, 0),
         innovation: None,
         weight: 0.25,
         enabled: true,
     };
     let conn_right = DefaultConnectionGene {
-        key: (-1, 0),
+        key: key(-1, 0),
         innovation: None,
         weight: -0.25,
         enabled: false,

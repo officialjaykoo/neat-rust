@@ -4,10 +4,13 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::activation::ActivationFunction;
+use crate::aggregation::AggregationFunction;
 use crate::attributes::XorShiftRng;
 use crate::config::Config;
-use crate::gene::{DefaultConnectionGene, DefaultNodeGene};
+use crate::gene::{ConnectionKey, DefaultConnectionGene, DefaultNodeGene};
 use crate::genome::DefaultGenome;
+use crate::ids::{GenomeId, SpeciesId};
 use crate::innovation::InnovationTracker;
 use crate::population::Population;
 use crate::reproduction::ReproductionState;
@@ -32,7 +35,7 @@ pub enum CheckpointError {
 struct SpeciesMeta {
     created: usize,
     last_improved: usize,
-    representative_key: Option<i64>,
+    representative_key: Option<GenomeId>,
     fitness: Option<f64>,
     adjusted_fitness: Option<f64>,
     fitness_history: Vec<f64>,
@@ -180,8 +183,8 @@ fn checkpoint_text(checkpointer: &Checkpointer, population: &Population) -> Stri
             &[
                 "ancestor".to_string(),
                 child.to_string(),
-                option_i64(parents.0),
-                option_i64(parents.1),
+                option_genome_id(parents.0),
+                option_genome_id(parents.1),
             ],
         );
     }
@@ -209,8 +212,8 @@ fn push_genome(out: &mut String, role: &str, genome: &DefaultGenome) {
                 node.key.to_string(),
                 node.bias.to_string(),
                 node.response.to_string(),
-                node.activation.clone(),
-                node.aggregation.clone(),
+                node.activation.to_string(),
+                node.aggregation.to_string(),
                 node.time_constant.to_string(),
                 node.iz_a.to_string(),
                 node.iz_b.to_string(),
@@ -229,8 +232,8 @@ fn push_genome(out: &mut String, role: &str, genome: &DefaultGenome) {
                 "connection".to_string(),
                 role.to_string(),
                 genome.key.to_string(),
-                connection.key.0.to_string(),
-                connection.key.1.to_string(),
+                connection.key.input.to_string(),
+                connection.key.output.to_string(),
                 option_i64(connection.innovation),
                 connection.weight.to_string(),
                 bool_text(connection.enabled).to_string(),
@@ -245,15 +248,15 @@ fn restore_checkpoint_text(text: &str) -> Result<Population, CheckpointError> {
     let mut generation = 0usize;
     let mut skip_first_evaluation = false;
     let mut rng_state = 1u64;
-    let mut genome_indexer = 1i64;
+    let mut genome_indexer = GenomeId::new(1);
     let mut innovation = 0i64;
-    let mut species_next_key = 1i64;
+    let mut species_next_key = SpeciesId::new(1);
     let mut species_compatibility_threshold: Option<f64> = None;
-    let mut population = BTreeMap::new();
+    let mut population: BTreeMap<GenomeId, DefaultGenome> = BTreeMap::new();
     let mut best_genome: Option<DefaultGenome> = None;
-    let mut species_meta: BTreeMap<i64, SpeciesMeta> = BTreeMap::new();
-    let mut species_members: BTreeMap<i64, Vec<i64>> = BTreeMap::new();
-    let mut ancestors: BTreeMap<i64, (Option<i64>, Option<i64>)> = BTreeMap::new();
+    let mut species_meta: BTreeMap<SpeciesId, SpeciesMeta> = BTreeMap::new();
+    let mut species_members: BTreeMap<SpeciesId, Vec<GenomeId>> = BTreeMap::new();
+    let mut ancestors: BTreeMap<GenomeId, (Option<GenomeId>, Option<GenomeId>)> = BTreeMap::new();
 
     for raw_line in text.lines() {
         if raw_line.is_empty() {
@@ -268,9 +271,11 @@ fn restore_checkpoint_text(text: &str) -> Result<Population, CheckpointError> {
                     skip_first_evaluation = parse_bool(value, "skip_first_evaluation")?
                 }
                 "rng_state" => rng_state = parse_u64(value, "rng_state")?,
-                "genome_indexer" => genome_indexer = parse_i64(value, "genome_indexer")?,
+                "genome_indexer" => genome_indexer = parse_genome_id(value, "genome_indexer")?,
                 "innovation" => innovation = parse_i64(value, "innovation")?,
-                "species_next_key" => species_next_key = parse_i64(value, "species_next_key")?,
+                "species_next_key" => {
+                    species_next_key = parse_species_id(value, "species_next_key")?
+                }
                 "species_compatibility_threshold" => {
                     species_compatibility_threshold =
                         parse_option_f64(value, "species_compatibility_threshold")?
@@ -285,7 +290,7 @@ fn restore_checkpoint_text(text: &str) -> Result<Population, CheckpointError> {
             Some("genome") => {
                 require_len(&parts, 4, "genome")?;
                 let role = &parts[1];
-                let key = parse_i64(&parts[2], "genome key")?;
+                let key = parse_genome_id(&parts[2], "genome key")?;
                 let mut genome = DefaultGenome::new(key);
                 genome.fitness = parse_option_f64(&parts[3], "genome fitness")?;
                 insert_genome(role, genome, &mut population, &mut best_genome)?;
@@ -298,15 +303,15 @@ fn restore_checkpoint_text(text: &str) -> Result<Population, CheckpointError> {
                     )));
                 }
                 let role = &parts[1];
-                let genome_key = parse_i64(&parts[2], "node genome key")?;
+                let genome_key = parse_genome_id(&parts[2], "node genome key")?;
                 let extended = parts.len() == 16;
                 let memory_offset = if extended { 13 } else { 8 };
                 let node = DefaultNodeGene {
                     key: parse_i64(&parts[3], "node key")?,
                     bias: parse_f64(&parts[4], "node bias")?,
                     response: parse_f64(&parts[5], "node response")?,
-                    activation: parts[6].clone(),
-                    aggregation: parts[7].clone(),
+                    activation: parse_activation(&parts[6], "node activation")?,
+                    aggregation: parse_aggregation(&parts[7], "node aggregation")?,
                     time_constant: if extended {
                         parse_f64(&parts[8], "node time_constant")?
                     } else {
@@ -352,11 +357,11 @@ fn restore_checkpoint_text(text: &str) -> Result<Population, CheckpointError> {
             Some("connection") => {
                 require_len(&parts, 8, "connection")?;
                 let role = &parts[1];
-                let genome_key = parse_i64(&parts[2], "connection genome key")?;
+                let genome_key = parse_genome_id(&parts[2], "connection genome key")?;
                 let input = parse_i64(&parts[3], "connection input")?;
                 let output = parse_i64(&parts[4], "connection output")?;
                 let connection = DefaultConnectionGene {
-                    key: (input, output),
+                    key: ConnectionKey::new(input, output),
                     innovation: parse_option_i64(&parts[5], "connection innovation")?,
                     weight: parse_f64(&parts[6], "connection weight")?,
                     enabled: parse_bool(&parts[7], "connection enabled")?,
@@ -367,13 +372,16 @@ fn restore_checkpoint_text(text: &str) -> Result<Population, CheckpointError> {
             }
             Some("species") => {
                 require_len(&parts, 8, "species")?;
-                let key = parse_i64(&parts[1], "species key")?;
+                let key = parse_species_id(&parts[1], "species key")?;
                 species_meta.insert(
                     key,
                     SpeciesMeta {
                         created: parse_usize(&parts[2], "species created")?,
                         last_improved: parse_usize(&parts[3], "species last_improved")?,
-                        representative_key: parse_option_i64(&parts[4], "species representative")?,
+                        representative_key: parse_option_genome_id(
+                            &parts[4],
+                            "species representative",
+                        )?,
                         fitness: parse_option_f64(&parts[5], "species fitness")?,
                         adjusted_fitness: parse_option_f64(&parts[6], "species adjusted_fitness")?,
                         fitness_history: parse_f64_list(&parts[7], "species fitness_history")?,
@@ -382,8 +390,8 @@ fn restore_checkpoint_text(text: &str) -> Result<Population, CheckpointError> {
             }
             Some("species_member") => {
                 require_len(&parts, 3, "species_member")?;
-                let species_id = parse_i64(&parts[1], "species_member species")?;
-                let genome_id = parse_i64(&parts[2], "species_member genome")?;
+                let species_id = parse_species_id(&parts[1], "species_member species")?;
+                let genome_id = parse_genome_id(&parts[2], "species_member genome")?;
                 species_members
                     .entry(species_id)
                     .or_default()
@@ -392,10 +400,10 @@ fn restore_checkpoint_text(text: &str) -> Result<Population, CheckpointError> {
             Some("ancestor") => {
                 require_len(&parts, 4, "ancestor")?;
                 ancestors.insert(
-                    parse_i64(&parts[1], "ancestor child")?,
+                    parse_genome_id(&parts[1], "ancestor child")?,
                     (
-                        parse_option_i64(&parts[2], "ancestor parent1")?,
-                        parse_option_i64(&parts[3], "ancestor parent2")?,
+                        parse_option_genome_id(&parts[2], "ancestor parent1")?,
+                        parse_option_genome_id(&parts[3], "ancestor parent2")?,
                     ),
                 );
             }
@@ -442,10 +450,10 @@ fn restore_checkpoint_text(text: &str) -> Result<Population, CheckpointError> {
 }
 
 fn build_species_set(
-    species_meta: BTreeMap<i64, SpeciesMeta>,
-    species_members: BTreeMap<i64, Vec<i64>>,
-    population: &BTreeMap<i64, DefaultGenome>,
-    next_species_key: i64,
+    species_meta: BTreeMap<SpeciesId, SpeciesMeta>,
+    species_members: BTreeMap<SpeciesId, Vec<GenomeId>>,
+    population: &BTreeMap<GenomeId, DefaultGenome>,
+    next_species_key: SpeciesId,
     compatibility_threshold: Option<f64>,
 ) -> Result<SpeciesSet, CheckpointError> {
     let mut species_map = BTreeMap::new();
@@ -485,7 +493,7 @@ fn build_species_set(
 fn insert_genome(
     role: &str,
     genome: DefaultGenome,
-    population: &mut BTreeMap<i64, DefaultGenome>,
+    population: &mut BTreeMap<GenomeId, DefaultGenome>,
     best_genome: &mut Option<DefaultGenome>,
 ) -> Result<(), CheckpointError> {
     match role {
@@ -505,8 +513,8 @@ fn insert_genome(
 
 fn genome_mut<'a>(
     role: &str,
-    key: i64,
-    population: &'a mut BTreeMap<i64, DefaultGenome>,
+    key: GenomeId,
+    population: &'a mut BTreeMap<GenomeId, DefaultGenome>,
     best_genome: &'a mut Option<DefaultGenome>,
 ) -> Result<&'a mut DefaultGenome, CheckpointError> {
     match role {
@@ -604,6 +612,12 @@ fn option_i64(value: Option<i64>) -> String {
         .unwrap_or_else(|| "null".to_string())
 }
 
+fn option_genome_id(value: Option<GenomeId>) -> String {
+    value
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "null".to_string())
+}
+
 fn require_len(parts: &[String], expected: usize, label: &str) -> Result<(), CheckpointError> {
     if parts.len() == expected {
         Ok(())
@@ -623,6 +637,20 @@ fn parse_bool(value: &str, label: &str) -> Result<bool, CheckpointError> {
             "{label} must be true or false"
         ))),
     }
+}
+
+fn parse_activation(value: &str, label: &str) -> Result<ActivationFunction, CheckpointError> {
+    ActivationFunction::from_name(value).ok_or_else(|| {
+        CheckpointError::Invalid(format!("{label} must be a known activation, got {value:?}"))
+    })
+}
+
+fn parse_aggregation(value: &str, label: &str) -> Result<AggregationFunction, CheckpointError> {
+    AggregationFunction::from_name(value).ok_or_else(|| {
+        CheckpointError::Invalid(format!(
+            "{label} must be a known aggregation, got {value:?}"
+        ))
+    })
 }
 
 fn parse_f64(value: &str, label: &str) -> Result<f64, CheckpointError> {
@@ -650,6 +678,22 @@ fn parse_option_i64(value: &str, label: &str) -> Result<Option<i64>, CheckpointE
         Ok(None)
     } else {
         Ok(Some(parse_i64(value, label)?))
+    }
+}
+
+fn parse_genome_id(value: &str, label: &str) -> Result<GenomeId, CheckpointError> {
+    Ok(GenomeId::new(parse_i64(value, label)?))
+}
+
+fn parse_species_id(value: &str, label: &str) -> Result<SpeciesId, CheckpointError> {
+    Ok(SpeciesId::new(parse_i64(value, label)?))
+}
+
+fn parse_option_genome_id(value: &str, label: &str) -> Result<Option<GenomeId>, CheckpointError> {
+    if value.trim() == "null" {
+        Ok(None)
+    } else {
+        Ok(Some(parse_genome_id(value, label)?))
     }
 }
 

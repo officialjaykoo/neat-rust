@@ -59,6 +59,12 @@ impl AggregationFunction {
     }
 }
 
+impl fmt::Display for AggregationFunction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
 impl AggregationError {
     pub fn unknown(name: &str) -> Self {
         Self {

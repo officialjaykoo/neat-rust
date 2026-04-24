@@ -92,9 +92,9 @@ fn push_nodes(out: &mut String, genome: &DefaultGenome) {
         out.push_str(":{");
         push_json_i64_field(out, "node_id", *node_id);
         out.push(',');
-        push_json_string_field(out, "activation", &node.activation);
+        push_json_string_field(out, "activation", node.activation.name());
         out.push(',');
-        push_json_string_field(out, "aggregation", &node.aggregation);
+        push_json_string_field(out, "aggregation", node.aggregation.name());
         out.push(',');
         push_json_f64_field(out, "bias", node.bias);
         out.push(',');
@@ -127,9 +127,9 @@ fn push_connections(out: &mut String, genome: &DefaultGenome) {
             out.push(',');
         }
         out.push('{');
-        push_json_i64_field(out, "in_node", connection.key.0);
+        push_json_i64_field(out, "in_node", connection.key.input);
         out.push(',');
-        push_json_i64_field(out, "out_node", connection.key.1);
+        push_json_i64_field(out, "out_node", connection.key.output);
         out.push(',');
         push_json_f64_field(out, "weight", connection.weight);
         out.push(',');

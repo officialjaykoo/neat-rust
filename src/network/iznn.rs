@@ -228,7 +228,8 @@ impl Iznn {
                 continue;
             }
 
-            let (input_node, output_node) = connection_gene.key;
+            let input_node = connection_gene.key.input;
+            let output_node = connection_gene.key.output;
             if !required.contains(&output_node) {
                 continue;
             }

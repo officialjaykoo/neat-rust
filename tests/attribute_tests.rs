@@ -1,6 +1,6 @@
 use neat_rust::{
-    BoolAttribute, BoolAttributeConfig, FloatAttribute, FloatAttributeConfig, RandomSource,
-    StringAttribute, StringAttributeConfig,
+    BoolAttribute, BoolAttributeConfig, FloatAttribute, FloatAttributeConfig, FloatInitType,
+    RandomSource, StringAttribute, StringAttributeConfig,
 };
 
 #[derive(Debug, Clone)]
@@ -33,7 +33,7 @@ fn float_config() -> FloatAttributeConfig {
     FloatAttributeConfig {
         init_mean: 1.0,
         init_stdev: 1.0,
-        init_type: "uniform".to_string(),
+        init_type: FloatInitType::Uniform,
         max_value: 10.0,
         min_value: 0.0,
         mutate_power: 0.25,
@@ -67,7 +67,7 @@ fn initializes_float_with_uniform_bounds() {
 #[test]
 fn mutates_float_with_gaussian_delta_and_clamp() {
     let mut config = float_config();
-    config.init_type = "gaussian".to_string();
+    config.init_type = FloatInitType::Gaussian;
     let mut rng = SequenceRng::new(&[0.0, (-0.5f64).exp(), 0.0]);
     let value = FloatAttribute::mutate_value(1.0, &config, &mut rng).expect("float should mutate");
 

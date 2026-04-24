@@ -142,7 +142,8 @@ impl RecurrentNetwork {
                 continue;
             }
 
-            let (input_node, output_node) = connection_gene.key;
+            let input_node = connection_gene.key.input;
+            let output_node = connection_gene.key.output;
             if !required.contains(&output_node) && !required.contains(&input_node) {
                 continue;
             }
@@ -159,23 +160,10 @@ impl RecurrentNetwork {
                 .nodes
                 .get(&node_key)
                 .ok_or(RecurrentError::MissingNodeGene(node_key))?;
-            let aggregation =
-                AggregationFunction::from_name(&node_gene.aggregation).ok_or_else(|| {
-                    RecurrentError::UnknownAggregation(AggregationError::unknown(
-                        &node_gene.aggregation,
-                    ))
-                })?;
-            let activation =
-                ActivationFunction::from_name(&node_gene.activation).ok_or_else(|| {
-                    RecurrentError::UnknownActivation(ActivationError::unknown(
-                        &node_gene.activation,
-                    ))
-                })?;
-
             node_evals.push(RecurrentNodeEval {
                 node: node_key,
-                activation,
-                aggregation,
+                activation: node_gene.activation,
+                aggregation: node_gene.aggregation,
                 bias: node_gene.bias,
                 response: node_gene.response,
                 links,

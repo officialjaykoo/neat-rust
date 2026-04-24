@@ -18,6 +18,7 @@ pub mod genome;
 pub mod gpu;
 mod gpu_native;
 pub mod graph;
+pub mod ids;
 pub mod innovation;
 pub mod network;
 pub mod policy_bridge;
@@ -44,8 +45,8 @@ pub use compat::{
         save_rust_checkpoint, ActivationConfig, AggregationConfig, BoolAttributeConfig,
         CheckpointError, Checkpointer, CompatibilityExcessCoefficient, Config, ConfigError,
         ConnectionGeneConfig, FitnessCriterion, FitnessSharingMode, FloatAttributeConfig,
-        GenomeConfig, GenomeJsonOptions, InitialConnection, InitialConnectionMode, NeatConfig,
-        ReproductionConfig, RustCheckpointSink, SpawnMethod, SpeciesFitnessFunction,
+        FloatInitType, GenomeConfig, GenomeJsonOptions, InitialConnection, InitialConnectionMode,
+        NeatConfig, ReproductionConfig, RustCheckpointSink, SpawnMethod, SpeciesFitnessFunction,
         SpeciesSetConfig, StagnationConfig, StringAttributeConfig, StructuralMutationSurer,
         TargetNumSpecies, NEAT_PYTHON_GENOME_FORMAT,
     },
@@ -96,6 +97,7 @@ pub use core::{
         StdOutReporter,
     },
 };
+pub use ids::{GenomeId, SpeciesId};
 pub use runtime::kflower::{
     run_kflower_training, TrainEvalBackend, TrainRunSummary, TrainRunnerError, TrainRunnerOptions,
     TrainRuntimeConfig,

@@ -474,11 +474,39 @@ pub struct StringAttributeConfig {
 pub type ActivationConfig = StringAttributeConfig;
 pub type AggregationConfig = StringAttributeConfig;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FloatInitType {
+    Gaussian,
+    Uniform,
+    Other(String),
+}
+
+impl FloatInitType {
+    pub fn from_raw(raw: &str) -> Self {
+        let normalized = raw.trim().to_ascii_lowercase();
+        if normalized.contains("gauss") || normalized.contains("normal") {
+            Self::Gaussian
+        } else if normalized.contains("uniform") {
+            Self::Uniform
+        } else {
+            Self::Other(normalized)
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Gaussian => "gaussian",
+            Self::Uniform => "uniform",
+            Self::Other(value) => value.as_str(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct FloatAttributeConfig {
     pub init_mean: f64,
     pub init_stdev: f64,
-    pub init_type: String,
+    pub init_type: FloatInitType,
     pub max_value: f64,
     pub min_value: f64,
     pub mutate_power: f64,
@@ -626,7 +654,7 @@ impl Config {
                     FloatAttributeConfig {
                         init_mean: 1.0,
                         init_stdev: 0.0,
-                        init_type: "gaussian".to_string(),
+                        init_type: FloatInitType::Gaussian,
                         max_value: 1.0,
                         min_value: 1.0,
                         mutate_power: 0.0,
@@ -641,7 +669,7 @@ impl Config {
                     FloatAttributeConfig {
                         init_mean: 1.0,
                         init_stdev: 0.0,
-                        init_type: "gaussian".to_string(),
+                        init_type: FloatInitType::Gaussian,
                         max_value: 10.0,
                         min_value: 0.01,
                         mutate_power: 0.0,
@@ -656,7 +684,7 @@ impl Config {
                     FloatAttributeConfig {
                         init_mean: 0.02,
                         init_stdev: 0.0,
-                        init_type: "gaussian".to_string(),
+                        init_type: FloatInitType::Gaussian,
                         max_value: 0.02,
                         min_value: 0.02,
                         mutate_power: 0.0,
@@ -671,7 +699,7 @@ impl Config {
                     FloatAttributeConfig {
                         init_mean: 0.20,
                         init_stdev: 0.0,
-                        init_type: "gaussian".to_string(),
+                        init_type: FloatInitType::Gaussian,
                         max_value: 0.20,
                         min_value: 0.20,
                         mutate_power: 0.0,
@@ -686,7 +714,7 @@ impl Config {
                     FloatAttributeConfig {
                         init_mean: -65.0,
                         init_stdev: 0.0,
-                        init_type: "gaussian".to_string(),
+                        init_type: FloatInitType::Gaussian,
                         max_value: -65.0,
                         min_value: -65.0,
                         mutate_power: 0.0,
@@ -701,7 +729,7 @@ impl Config {
                     FloatAttributeConfig {
                         init_mean: 8.0,
                         init_stdev: 0.0,
-                        init_type: "gaussian".to_string(),
+                        init_type: FloatInitType::Gaussian,
                         max_value: 8.0,
                         min_value: 8.0,
                         mutate_power: 0.0,
@@ -727,7 +755,7 @@ impl Config {
                     FloatAttributeConfig {
                         init_mean: 0.0,
                         init_stdev: 0.0,
-                        init_type: "gaussian".to_string(),
+                        init_type: FloatInitType::Gaussian,
                         max_value: 0.0,
                         min_value: 0.0,
                         mutate_power: 0.0,
@@ -742,7 +770,7 @@ impl Config {
                     FloatAttributeConfig {
                         init_mean: 1.0,
                         init_stdev: 0.0,
-                        init_type: "gaussian".to_string(),
+                        init_type: FloatInitType::Gaussian,
                         max_value: 1.0,
                         min_value: 1.0,
                         mutate_power: 0.0,
@@ -1146,7 +1174,11 @@ fn get_float_attribute(
     Ok(FloatAttributeConfig {
         init_mean: get_f64(section_map, section, &format!("{prefix}_init_mean"))?,
         init_stdev: get_f64(section_map, section, &format!("{prefix}_init_stdev"))?,
-        init_type: get_string(section_map, section, &format!("{prefix}_init_type"))?,
+        init_type: FloatInitType::from_raw(&get_string(
+            section_map,
+            section,
+            &format!("{prefix}_init_type"),
+        )?),
         max_value: get_f64(section_map, section, &format!("{prefix}_max_value"))?,
         min_value: get_f64(section_map, section, &format!("{prefix}_min_value"))?,
         mutate_power: get_f64(section_map, section, &format!("{prefix}_mutate_power"))?,

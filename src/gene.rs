@@ -1,21 +1,40 @@
 use std::error::Error;
 use std::fmt;
 
+use crate::activation::{ActivationError, ActivationFunction};
+use crate::aggregation::{AggregationError, AggregationFunction};
 use crate::attributes::{
     AttributeError, BoolAttribute, FloatAttribute, RandomSource, StringAttribute,
 };
 use crate::config::GenomeConfig;
 
 pub type NodeKey = i64;
-pub type ConnectionKey = (NodeKey, NodeKey);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ConnectionKey {
+    pub input: NodeKey,
+    pub output: NodeKey,
+}
+
+impl ConnectionKey {
+    pub const fn new(input: NodeKey, output: NodeKey) -> Self {
+        Self { input, output }
+    }
+}
+
+impl fmt::Display for ConnectionKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "({}, {})", self.input, self.output)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DefaultNodeGene {
     pub key: NodeKey,
     pub bias: f64,
     pub response: f64,
-    pub activation: String,
-    pub aggregation: String,
+    pub activation: ActivationFunction,
+    pub aggregation: AggregationFunction,
     pub time_constant: f64,
     pub iz_a: f64,
     pub iz_b: f64,
@@ -37,6 +56,8 @@ pub struct DefaultConnectionGene {
 #[derive(Debug, Clone, PartialEq)]
 pub enum GeneError {
     Attribute(AttributeError),
+    Activation(ActivationError),
+    Aggregation(AggregationError),
     InnovationMismatch { left: i64, right: i64 },
     KeyMismatch { left: String, right: String },
 }
@@ -45,6 +66,8 @@ impl fmt::Display for GeneError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Attribute(err) => write!(f, "{err}"),
+            Self::Activation(err) => write!(f, "{err}"),
+            Self::Aggregation(err) => write!(f, "{err}"),
             Self::InnovationMismatch { left, right } => {
                 write!(f, "gene innovation mismatch: left={left}, right={right}")
             }
@@ -63,14 +86,26 @@ impl From<AttributeError> for GeneError {
     }
 }
 
+impl From<ActivationError> for GeneError {
+    fn from(value: ActivationError) -> Self {
+        Self::Activation(value)
+    }
+}
+
+impl From<AggregationError> for GeneError {
+    fn from(value: AggregationError) -> Self {
+        Self::Aggregation(value)
+    }
+}
+
 impl DefaultNodeGene {
     pub fn new(key: NodeKey) -> Self {
         Self {
             key,
             bias: 0.0,
             response: 1.0,
-            activation: "sigmoid".to_string(),
-            aggregation: "sum".to_string(),
+            activation: ActivationFunction::Sigmoid,
+            aggregation: AggregationFunction::Sum,
             time_constant: 1.0,
             iz_a: 0.02,
             iz_b: 0.20,
@@ -99,8 +134,9 @@ impl DefaultNodeGene {
     ) -> Result<(), GeneError> {
         self.bias = FloatAttribute::init_value(&config.bias, rng)?;
         self.response = FloatAttribute::init_value(&config.response, rng)?;
-        self.activation = StringAttribute::init_value(&config.activation, rng)?;
-        self.aggregation = StringAttribute::init_value(&config.aggregation, rng)?;
+        self.activation = parse_activation(StringAttribute::init_value(&config.activation, rng)?)?;
+        self.aggregation =
+            parse_aggregation(StringAttribute::init_value(&config.aggregation, rng)?)?;
         self.time_constant = FloatAttribute::init_value(&config.time_constant, rng)?;
         self.iz_a = FloatAttribute::init_value(&config.iz_a, rng)?;
         self.iz_b = FloatAttribute::init_value(&config.iz_b, rng)?;
@@ -119,9 +155,16 @@ impl DefaultNodeGene {
     ) -> Result<(), GeneError> {
         self.bias = FloatAttribute::mutate_value(self.bias, &config.bias, rng)?;
         self.response = FloatAttribute::mutate_value(self.response, &config.response, rng)?;
-        self.activation = StringAttribute::mutate_value(&self.activation, &config.activation, rng)?;
-        self.aggregation =
-            StringAttribute::mutate_value(&self.aggregation, &config.aggregation, rng)?;
+        self.activation = parse_activation(StringAttribute::mutate_value(
+            self.activation.name(),
+            &config.activation,
+            rng,
+        )?)?;
+        self.aggregation = parse_aggregation(StringAttribute::mutate_value(
+            self.aggregation.name(),
+            &config.aggregation,
+            rng,
+        )?)?;
         self.time_constant =
             FloatAttribute::mutate_value(self.time_constant, &config.time_constant, rng)?;
         self.iz_a = FloatAttribute::mutate_value(self.iz_a, &config.iz_a, rng)?;
@@ -150,22 +193,22 @@ impl DefaultNodeGene {
 
         Ok(Self {
             key: self.key,
-            bias: choose_f64(self.bias, other.bias, rng),
-            response: choose_f64(self.response, other.response, rng),
-            activation: choose_string(&self.activation, &other.activation, rng),
-            aggregation: choose_string(&self.aggregation, &other.aggregation, rng),
-            time_constant: choose_f64(self.time_constant, other.time_constant, rng),
-            iz_a: choose_f64(self.iz_a, other.iz_a, rng),
-            iz_b: choose_f64(self.iz_b, other.iz_b, rng),
-            iz_c: choose_f64(self.iz_c, other.iz_c, rng),
-            iz_d: choose_f64(self.iz_d, other.iz_d, rng),
-            memory_gate_enabled: choose_bool(
+            bias: choose_copy(self.bias, other.bias, rng),
+            response: choose_copy(self.response, other.response, rng),
+            activation: choose_copy(self.activation, other.activation, rng),
+            aggregation: choose_copy(self.aggregation, other.aggregation, rng),
+            time_constant: choose_copy(self.time_constant, other.time_constant, rng),
+            iz_a: choose_copy(self.iz_a, other.iz_a, rng),
+            iz_b: choose_copy(self.iz_b, other.iz_b, rng),
+            iz_c: choose_copy(self.iz_c, other.iz_c, rng),
+            iz_d: choose_copy(self.iz_d, other.iz_d, rng),
+            memory_gate_enabled: choose_copy(
                 self.memory_gate_enabled,
                 other.memory_gate_enabled,
                 rng,
             ),
-            memory_gate_bias: choose_f64(self.memory_gate_bias, other.memory_gate_bias, rng),
-            memory_gate_response: choose_f64(
+            memory_gate_bias: choose_copy(self.memory_gate_bias, other.memory_gate_bias, rng),
+            memory_gate_response: choose_copy(
                 self.memory_gate_response,
                 other.memory_gate_response,
                 rng,
@@ -259,8 +302,8 @@ impl DefaultConnectionGene {
     pub fn crossover(&self, other: &Self, rng: &mut impl RandomSource) -> Result<Self, GeneError> {
         if self.key != other.key {
             return Err(GeneError::KeyMismatch {
-                left: format!("{:?}", self.key),
-                right: format!("{:?}", other.key),
+                left: self.key.to_string(),
+                right: other.key.to_string(),
             });
         }
         if let (Some(left), Some(right)) = (self.innovation, other.innovation) {
@@ -269,8 +312,8 @@ impl DefaultConnectionGene {
             }
         }
 
-        let weight = choose_f64(self.weight, other.weight, rng);
-        let mut enabled = choose_bool(self.enabled, other.enabled, rng);
+        let weight = choose_copy(self.weight, other.weight, rng);
+        let mut enabled = choose_copy(self.enabled, other.enabled, rng);
         if !self.enabled || !other.enabled {
             enabled = rng.next_f64() >= 0.75;
         }
@@ -286,8 +329,8 @@ impl DefaultConnectionGene {
     pub fn distance(&self, other: &Self, config: &GenomeConfig) -> Result<f64, GeneError> {
         if self.key != other.key {
             return Err(GeneError::KeyMismatch {
-                left: format!("{:?}", self.key),
-                right: format!("{:?}", other.key),
+                left: self.key.to_string(),
+                right: other.key.to_string(),
             });
         }
 
@@ -304,7 +347,7 @@ fn choose_first(rng: &mut impl RandomSource) -> bool {
     rng.next_f64() > 0.5
 }
 
-fn choose_f64(first: f64, second: f64, rng: &mut impl RandomSource) -> f64 {
+fn choose_copy<T: Copy>(first: T, second: T, rng: &mut impl RandomSource) -> T {
     if choose_first(rng) {
         first
     } else {
@@ -312,18 +355,10 @@ fn choose_f64(first: f64, second: f64, rng: &mut impl RandomSource) -> f64 {
     }
 }
 
-fn choose_bool(first: bool, second: bool, rng: &mut impl RandomSource) -> bool {
-    if choose_first(rng) {
-        first
-    } else {
-        second
-    }
+fn parse_activation(name: String) -> Result<ActivationFunction, GeneError> {
+    ActivationFunction::from_name(&name).ok_or_else(|| ActivationError::unknown(&name).into())
 }
 
-fn choose_string(first: &str, second: &str, rng: &mut impl RandomSource) -> String {
-    if choose_first(rng) {
-        first.to_string()
-    } else {
-        second.to_string()
-    }
+fn parse_aggregation(name: String) -> Result<AggregationFunction, GeneError> {
+    AggregationFunction::from_name(&name).ok_or_else(|| AggregationError::unknown(&name).into())
 }

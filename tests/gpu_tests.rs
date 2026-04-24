@@ -3,15 +3,22 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use neat_rust::{
-    native_cuda_available, pack_ctrnn_population, Config, DefaultConnectionGene, DefaultGenome,
-    DefaultNodeGene, GPUCTRNNEvaluator, GPUIZNNEvaluator, GpuEvaluatorBackend, GpuEvaluatorError,
-    GpuInputBatch,
+    native_cuda_available, pack_ctrnn_population, ActivationFunction, AggregationFunction, Config,
+    ConnectionKey, DefaultConnectionGene, DefaultGenome, DefaultNodeGene, GPUCTRNNEvaluator,
+    GPUIZNNEvaluator, GenomeId, GpuEvaluatorBackend, GpuEvaluatorError, GpuInputBatch,
 };
 
 fn repo_path(relative: &str) -> PathBuf {
+    let relative = relative.strip_prefix("scripts/configs/").unwrap_or(relative);
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
+        .join("tests")
+        .join("fixtures")
+        .join("configs")
         .join(relative)
+}
+
+fn conn_key(input: i64, output: i64) -> ConnectionKey {
+    ConnectionKey::new(input, output)
 }
 
 fn memory8_config() -> Config {
@@ -22,18 +29,18 @@ fn memory8_config() -> Config {
 fn simple_ctrnn_genome(key: i64) -> DefaultGenome {
     let mut genome = DefaultGenome::new(key);
     let mut output0 = DefaultNodeGene::new(0);
-    output0.activation = "identity".to_string();
-    output0.aggregation = "sum".to_string();
+    output0.activation = ActivationFunction::Identity;
+    output0.aggregation = AggregationFunction::Sum;
     output0.time_constant = 1.0;
     let mut output1 = DefaultNodeGene::new(1);
-    output1.activation = "identity".to_string();
-    output1.aggregation = "sum".to_string();
+    output1.activation = ActivationFunction::Identity;
+    output1.aggregation = AggregationFunction::Sum;
     output1.time_constant = 1.0;
     genome.nodes.insert(0, output0);
     genome.nodes.insert(1, output1);
     genome
         .connections
-        .insert((-1, 0), connection((-1, 0), 1, 1.0, true));
+        .insert(conn_key(-1, 0), connection(conn_key(-1, 0), 1, 1.0, true));
     genome
 }
 
@@ -43,12 +50,12 @@ fn simple_iznn_genome(key: i64) -> DefaultGenome {
     genome.nodes.insert(1, DefaultNodeGene::new(1));
     genome
         .connections
-        .insert((-1, 0), connection((-1, 0), 1, 1.0, true));
+        .insert(conn_key(-1, 0), connection(conn_key(-1, 0), 1, 1.0, true));
     genome
 }
 
 fn connection(
-    key: (i64, i64),
+    key: ConnectionKey,
     innovation: i64,
     weight: f64,
     enabled: bool,
@@ -76,7 +83,7 @@ fn native_cuda_backend_is_detected_when_nvidia_driver_is_present() {
 fn gpu_ctrnn_packing_matches_neat_python_layout() {
     let config = memory8_config();
     let mut genomes = BTreeMap::new();
-    genomes.insert(1, simple_ctrnn_genome(1));
+    genomes.insert(GenomeId::new(1), simple_ctrnn_genome(1));
 
     let packed = pack_ctrnn_population(&genomes, &config.genome).expect("pack should work");
     let key_map = &packed.node_key_maps[0];
@@ -94,7 +101,10 @@ fn gpu_ctrnn_packing_matches_neat_python_layout() {
 #[test]
 fn gpu_ctrnn_evaluator_assigns_fitness_with_cpu_fallback() {
     let config = memory8_config();
-    let mut genomes = BTreeMap::from([(1, simple_ctrnn_genome(1)), (2, simple_ctrnn_genome(2))]);
+    let mut genomes = BTreeMap::from([
+        (GenomeId::new(1), simple_ctrnn_genome(1)),
+        (GenomeId::new(2), simple_ctrnn_genome(2)),
+    ]);
     let mut evaluator = GPUCTRNNEvaluator::new(
         0.1,
         0.2,
@@ -120,7 +130,7 @@ fn gpu_ctrnn_evaluator_assigns_fitness_with_cpu_fallback() {
 #[test]
 fn gpu_iznn_evaluator_assigns_fitness_with_cpu_fallback() {
     let config = memory8_config();
-    let mut genomes = BTreeMap::from([(1, simple_iznn_genome(1))]);
+    let mut genomes = BTreeMap::from([(GenomeId::new(1), simple_iznn_genome(1))]);
     let mut evaluator = GPUIZNNEvaluator::new(
         0.05,
         0.05,
@@ -136,15 +146,15 @@ fn gpu_iznn_evaluator_assigns_fitness_with_cpu_fallback() {
         .evaluate(&mut genomes, &config)
         .expect("gpu iznn evaluator should run");
 
-    assert_eq!(genomes[&1].fitness, Some(1.0));
+    assert_eq!(genomes[&GenomeId::new(1)].fitness, Some(1.0));
 }
 
 #[test]
 fn gpu_ctrnn_packing_rejects_non_sum_aggregation() {
     let config = memory8_config();
     let mut genome = simple_ctrnn_genome(1);
-    genome.nodes.get_mut(&0).unwrap().aggregation = "product".to_string();
-    let genomes = BTreeMap::from([(1, genome)]);
+    genome.nodes.get_mut(&0).unwrap().aggregation = AggregationFunction::Product;
+    let genomes = BTreeMap::from([(GenomeId::new(1), genome)]);
 
     let err = pack_ctrnn_population(&genomes, &config.genome).expect_err("must reject product");
 
@@ -161,7 +171,7 @@ fn gpu_native_required_executes_ctrnn_when_cuda_available() {
     }
 
     let config = memory8_config();
-    let mut genomes = BTreeMap::from([(1, simple_ctrnn_genome(1))]);
+    let mut genomes = BTreeMap::from([(GenomeId::new(1), simple_ctrnn_genome(1))]);
     let mut evaluator = GPUCTRNNEvaluator::new(
         0.1,
         0.2,
@@ -179,7 +189,7 @@ fn gpu_native_required_executes_ctrnn_when_cuda_available() {
         .expect("native CUDA backend should run");
 
     let expected = 1.0 - (-0.2_f64).exp();
-    assert!((genomes[&1].fitness.unwrap() - expected).abs() < 5.0e-3);
+    assert!((genomes[&GenomeId::new(1)].fitness.unwrap() - expected).abs() < 5.0e-3);
 }
 
 #[test]
@@ -189,7 +199,7 @@ fn gpu_native_required_executes_iznn_when_cuda_available() {
     }
 
     let config = memory8_config();
-    let mut genomes = BTreeMap::from([(1, simple_iznn_genome(1))]);
+    let mut genomes = BTreeMap::from([(GenomeId::new(1), simple_iznn_genome(1))]);
     let mut evaluator = GPUIZNNEvaluator::new(
         0.05,
         0.05,
@@ -206,5 +216,5 @@ fn gpu_native_required_executes_iznn_when_cuda_available() {
         .evaluate(&mut genomes, &config)
         .expect("native CUDA backend should run");
 
-    assert_eq!(genomes[&1].fitness, Some(1.0));
+    assert_eq!(genomes[&GenomeId::new(1)].fitness, Some(1.0));
 }

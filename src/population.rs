@@ -10,6 +10,7 @@ use crate::evolution::{
     PopulationFitnessSummary, PopulationFitnessSummaryError,
 };
 use crate::genome::{DefaultGenome, GenomeError};
+use crate::ids::GenomeId;
 use crate::reporting::{Reporter, ReporterSet};
 use crate::reproduction::{ReproductionError, ReproductionState};
 use crate::species::SpeciesSet;
@@ -23,7 +24,7 @@ pub enum PopulationError {
     Reproduction(ReproductionError),
     Checkpoint(PopulationCheckpointError),
     Fitness(String),
-    FitnessNotAssigned(i64),
+    FitnessNotAssigned(GenomeId),
     NoGenerationalLimit,
     CompleteExtinction,
     NoBestGenome,
@@ -31,7 +32,7 @@ pub enum PopulationError {
 
 pub struct Population {
     pub config: Config,
-    pub population: BTreeMap<i64, DefaultGenome>,
+    pub population: BTreeMap<GenomeId, DefaultGenome>,
     pub species: SpeciesSet,
     pub generation: usize,
     pub best_genome: Option<DefaultGenome>,
@@ -66,7 +67,7 @@ impl Population {
 
     pub(crate) fn from_checkpoint_parts(
         config: Config,
-        population: BTreeMap<i64, DefaultGenome>,
+        population: BTreeMap<GenomeId, DefaultGenome>,
         species: SpeciesSet,
         generation: usize,
         best_genome: Option<DefaultGenome>,
@@ -102,7 +103,7 @@ impl Population {
         generations: Option<usize>,
     ) -> Result<Option<DefaultGenome>, PopulationError>
     where
-        F: FnMut(&mut BTreeMap<i64, DefaultGenome>, &Config) -> FitnessResult,
+        F: FnMut(&mut BTreeMap<GenomeId, DefaultGenome>, &Config) -> FitnessResult,
     {
         if self.config.neat.no_fitness_termination && generations.is_none() {
             return Err(PopulationError::NoGenerationalLimit);

@@ -1,9 +1,10 @@
 use crate::config::Config;
+use crate::ids::SpeciesId;
 use crate::species::{Species, SpeciesSet};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StagnationUpdate {
-    pub species_id: i64,
+    pub species_id: SpeciesId,
     pub species: Species,
     pub stagnant: bool,
 }

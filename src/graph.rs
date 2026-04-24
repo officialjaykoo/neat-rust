@@ -3,7 +3,8 @@ use std::collections::BTreeSet;
 use crate::gene::{ConnectionKey, NodeKey};
 
 pub fn creates_cycle(connections: &[ConnectionKey], test: ConnectionKey) -> bool {
-    let (input, output) = test;
+    let input = test.input;
+    let output = test.output;
     if input == output {
         return true;
     }
@@ -13,12 +14,12 @@ pub fn creates_cycle(connections: &[ConnectionKey], test: ConnectionKey) -> bool
 
     loop {
         let mut num_added = 0;
-        for (source, target) in connections {
-            if visited.contains(source) && !visited.contains(target) {
-                if *target == input {
+        for connection in connections {
+            if visited.contains(&connection.input) && !visited.contains(&connection.output) {
+                if connection.output == input {
                     return true;
                 }
-                visited.insert(*target);
+                visited.insert(connection.output);
                 num_added += 1;
             }
         }
@@ -40,9 +41,9 @@ pub fn required_for_output(
 
     loop {
         let mut upstream = BTreeSet::new();
-        for (source, target) in connections {
-            if search.contains(target) && !search.contains(source) {
-                upstream.insert(*source);
+        for connection in connections {
+            if search.contains(&connection.output) && !search.contains(&connection.input) {
+                upstream.insert(connection.input);
             }
         }
 
@@ -70,8 +71,8 @@ pub fn feed_forward_layers(
     let required = required_for_output(inputs, outputs, connections);
 
     let mut nodes_with_inputs = BTreeSet::new();
-    for (_, target) in connections {
-        nodes_with_inputs.insert(*target);
+    for connection in connections {
+        nodes_with_inputs.insert(connection.output);
     }
 
     let bias_neurons: BTreeSet<NodeKey> =
@@ -86,9 +87,11 @@ pub fn feed_forward_layers(
 
     loop {
         let mut candidates = BTreeSet::new();
-        for (source, target) in connections {
-            if potential_input.contains(source) && !potential_input.contains(target) {
-                candidates.insert(*target);
+        for connection in connections {
+            if potential_input.contains(&connection.input)
+                && !potential_input.contains(&connection.output)
+            {
+                candidates.insert(connection.output);
             }
         }
 
@@ -97,12 +100,14 @@ pub fn feed_forward_layers(
             let incoming_required: Vec<ConnectionKey> = connections
                 .iter()
                 .copied()
-                .filter(|(source, target)| *target == node && required.contains(source))
+                .filter(|connection| {
+                    connection.output == node && required.contains(&connection.input)
+                })
                 .collect();
             if required.contains(&node)
                 && incoming_required
                     .iter()
-                    .all(|(source, _)| potential_input.contains(source))
+                    .all(|connection| potential_input.contains(&connection.input))
             {
                 next_layer.insert(node);
             }

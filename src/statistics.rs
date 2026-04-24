@@ -5,10 +5,11 @@ use std::path::Path;
 
 use crate::config::{Config, FitnessCriterion};
 use crate::genome::DefaultGenome;
+use crate::ids::{GenomeId, SpeciesId};
 use crate::reporting::{mean, median2, stdev, Reporter};
 use crate::species::SpeciesSet;
 
-pub type SpeciesFitnessSnapshot = BTreeMap<i64, BTreeMap<i64, f64>>;
+pub type SpeciesFitnessSnapshot = BTreeMap<SpeciesId, BTreeMap<GenomeId, f64>>;
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct StatisticsReporter {
@@ -56,7 +57,7 @@ impl StatisticsReporter {
         self.get_fitness_stat(median2)
     }
 
-    pub fn get_species_sizes_by_id(&self) -> Vec<BTreeMap<i64, usize>> {
+    pub fn get_species_sizes_by_id(&self) -> Vec<BTreeMap<SpeciesId, usize>> {
         self.generation_statistics
             .iter()
             .map(|snapshot| {
@@ -75,8 +76,13 @@ impl StatisticsReporter {
         self.generation_statistics
             .iter()
             .map(|snapshot| {
-                (1..=max_species)
-                    .map(|species_id| snapshot.get(&species_id).map(BTreeMap::len).unwrap_or(0))
+                (1..=max_species.raw())
+                    .map(|species_id| {
+                        snapshot
+                            .get(&SpeciesId::new(species_id))
+                            .map(BTreeMap::len)
+                            .unwrap_or(0)
+                    })
                     .collect()
             })
             .collect()
@@ -89,10 +95,10 @@ impl StatisticsReporter {
         self.generation_statistics
             .iter()
             .map(|snapshot| {
-                (1..=max_species)
+                (1..=max_species.raw())
                     .map(|species_id| {
                         snapshot
-                            .get(&species_id)
+                            .get(&SpeciesId::new(species_id))
                             .filter(|members| !members.is_empty())
                             .map(|members| {
                                 let values: Vec<f64> = members.values().copied().collect();
@@ -183,7 +189,7 @@ impl StatisticsReporter {
         fs::write(filename, rows.join("\n"))
     }
 
-    fn max_species_id(&self) -> Option<i64> {
+    fn max_species_id(&self) -> Option<SpeciesId> {
         let mut all_species = BTreeSet::new();
         for generation in &self.generation_statistics {
             all_species.extend(generation.keys().copied());
@@ -203,7 +209,7 @@ impl Reporter for StatisticsReporter {
     fn post_evaluate(
         &mut self,
         config: &Config,
-        _population: &BTreeMap<i64, DefaultGenome>,
+        _population: &BTreeMap<GenomeId, DefaultGenome>,
         species: &SpeciesSet,
         best_genome: &DefaultGenome,
     ) {

@@ -24,6 +24,10 @@ pub mod attributes {
     };
 }
 
+pub mod ids {
+    pub use crate::ids::{GenomeId, SpeciesId};
+}
+
 pub mod genes {
     pub use crate::gene::{
         ConnectionKey, DefaultConnectionGene, DefaultNodeGene, GeneError, NodeKey,

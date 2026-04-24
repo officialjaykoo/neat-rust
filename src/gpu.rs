@@ -3,14 +3,16 @@ use std::error::Error;
 use std::fmt;
 
 use crate::activation::ActivationFunction;
+use crate::aggregation::AggregationFunction;
 use crate::config::{Config, GenomeConfig};
-use crate::gene::{DefaultConnectionGene, NodeKey};
+use crate::gene::{ConnectionKey, DefaultConnectionGene, NodeKey};
 use crate::genome::{input_keys, output_keys, DefaultGenome};
 use crate::gpu_native::{
     ctrnn_native_supported, evaluate_ctrnn_batch_native, evaluate_iznn_batch_native,
     iznn_native_supported,
 };
 use crate::graph::required_for_output;
+use crate::ids::GenomeId;
 
 pub type OutputTrajectory = Vec<Vec<f64>>;
 
@@ -29,7 +31,7 @@ pub enum GpuInputBatch {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PackedCTRNNPopulation {
-    pub genome_keys: Vec<i64>,
+    pub genome_keys: Vec<GenomeId>,
     pub num_inputs: usize,
     pub num_outputs: usize,
     pub max_nodes: usize,
@@ -44,7 +46,7 @@ pub struct PackedCTRNNPopulation {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PackedIZNNPopulation {
-    pub genome_keys: Vec<i64>,
+    pub genome_keys: Vec<GenomeId>,
     pub num_inputs: usize,
     pub num_outputs: usize,
     pub max_nodes: usize,
@@ -66,16 +68,16 @@ pub enum GpuEvaluatorError {
     InvalidTimeConfig,
     EmptyPopulation,
     MissingNodeGene {
-        genome_key: i64,
+        genome_key: GenomeId,
         node_key: NodeKey,
     },
     UnsupportedActivation {
-        genome_key: i64,
+        genome_key: GenomeId,
         node_key: NodeKey,
         name: String,
     },
     UnsupportedAggregation {
-        genome_key: i64,
+        genome_key: GenomeId,
         node_key: NodeKey,
         name: String,
     },
@@ -88,7 +90,7 @@ pub enum GpuEvaluatorError {
         actual: usize,
     },
     InvalidNodeParameter {
-        genome_key: i64,
+        genome_key: GenomeId,
         node_key: NodeKey,
         name: &'static str,
         value: f64,
@@ -168,7 +170,7 @@ where
 
     pub fn evaluate(
         &mut self,
-        genomes: &mut BTreeMap<i64, DefaultGenome>,
+        genomes: &mut BTreeMap<GenomeId, DefaultGenome>,
         config: &Config,
     ) -> Result<(), GpuEvaluatorError> {
         validate_time_config(self.dt, self.t_max)?;
@@ -220,7 +222,7 @@ where
 
     pub fn evaluate(
         &mut self,
-        genomes: &mut BTreeMap<i64, DefaultGenome>,
+        genomes: &mut BTreeMap<GenomeId, DefaultGenome>,
         config: &Config,
     ) -> Result<(), GpuEvaluatorError> {
         validate_time_config(self.dt, self.t_max)?;
@@ -250,7 +252,7 @@ where
 }
 
 pub fn pack_ctrnn_population(
-    genomes: &BTreeMap<i64, DefaultGenome>,
+    genomes: &BTreeMap<GenomeId, DefaultGenome>,
     config: &GenomeConfig,
 ) -> Result<PackedCTRNNPopulation, GpuEvaluatorError> {
     if genomes.is_empty() {
@@ -311,19 +313,19 @@ pub fn pack_ctrnn_population(
             packed.response[idx] = node.response;
             packed.tau[idx] = node.time_constant;
             packed.activation[idx] =
-                supported_gpu_activation(&node.activation).ok_or_else(|| {
+                supported_gpu_activation(node.activation).ok_or_else(|| {
                     GpuEvaluatorError::UnsupportedActivation {
                         genome_key: info.genome_key,
                         node_key: *node_key,
-                        name: node.activation.clone(),
+                        name: node.activation.to_string(),
                     }
                 })?;
 
-            if node.aggregation.trim().to_ascii_lowercase() != "sum" {
+            if node.aggregation != AggregationFunction::Sum {
                 return Err(GpuEvaluatorError::UnsupportedAggregation {
                     genome_key: info.genome_key,
                     node_key: *node_key,
-                    name: node.aggregation.clone(),
+                    name: node.aggregation.to_string(),
                 });
             }
         }
@@ -342,7 +344,7 @@ pub fn pack_ctrnn_population(
 }
 
 pub fn pack_iznn_population(
-    genomes: &BTreeMap<i64, DefaultGenome>,
+    genomes: &BTreeMap<GenomeId, DefaultGenome>,
     config: &GenomeConfig,
 ) -> Result<PackedIZNNPopulation, GpuEvaluatorError> {
     if genomes.is_empty() {
@@ -589,7 +591,7 @@ pub fn native_cuda_available() -> bool {
 }
 
 struct PackingInfo<'a> {
-    genome_key: i64,
+    genome_key: GenomeId,
     genome: &'a DefaultGenome,
     required: BTreeSet<NodeKey>,
     key_map: BTreeMap<NodeKey, usize>,
@@ -597,7 +599,7 @@ struct PackingInfo<'a> {
 }
 
 fn collect_packing_info<'a>(
-    genomes: &'a BTreeMap<i64, DefaultGenome>,
+    genomes: &'a BTreeMap<GenomeId, DefaultGenome>,
     config: &GenomeConfig,
 ) -> Result<Vec<PackingInfo<'a>>, GpuEvaluatorError> {
     let config_inputs = input_keys(config);
@@ -648,13 +650,14 @@ fn fill_weights(
     max_nodes: usize,
     key_map: &BTreeMap<NodeKey, usize>,
     required: &BTreeSet<NodeKey>,
-    connections: &BTreeMap<(NodeKey, NodeKey), DefaultConnectionGene>,
+    connections: &BTreeMap<ConnectionKey, DefaultConnectionGene>,
 ) {
     for connection in connections.values() {
         if !connection.enabled {
             continue;
         }
-        let (src_key, dst_key) = connection.key;
+        let src_key = connection.key.input;
+        let dst_key = connection.key.output;
         if !required.contains(&dst_key) {
             continue;
         }
@@ -665,19 +668,19 @@ fn fill_weights(
     }
 }
 
-fn supported_gpu_activation(name: &str) -> Option<ActivationFunction> {
-    match name.trim().to_ascii_lowercase().as_str() {
-        "sigmoid" => Some(ActivationFunction::Sigmoid),
-        "tanh" => Some(ActivationFunction::Tanh),
-        "relu" => Some(ActivationFunction::Relu),
-        "identity" => Some(ActivationFunction::Identity),
-        "clamped" => Some(ActivationFunction::Clamped),
-        "elu" => Some(ActivationFunction::Elu),
-        "softplus" => Some(ActivationFunction::Softplus),
-        "sin" => Some(ActivationFunction::Sin),
-        "gauss" => Some(ActivationFunction::Gauss),
-        "abs" => Some(ActivationFunction::Abs),
-        "square" => Some(ActivationFunction::Square),
+fn supported_gpu_activation(value: ActivationFunction) -> Option<ActivationFunction> {
+    match value {
+        ActivationFunction::Sigmoid
+        | ActivationFunction::Tanh
+        | ActivationFunction::Relu
+        | ActivationFunction::Identity
+        | ActivationFunction::Clamped
+        | ActivationFunction::Elu
+        | ActivationFunction::Softplus
+        | ActivationFunction::Sin
+        | ActivationFunction::Gauss
+        | ActivationFunction::Abs
+        | ActivationFunction::Square => Some(value),
         _ => None,
     }
 }

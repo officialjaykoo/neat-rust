@@ -1,11 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-use neat_rust::{Config, DefaultGenome, Population, SpeciesSet, XorShiftRng};
+use neat_rust::{Config, DefaultGenome, GenomeId, Population, SpeciesId, SpeciesSet, XorShiftRng};
 
 fn repo_path(relative: &str) -> PathBuf {
+    let relative = relative.strip_prefix("scripts/configs/").unwrap_or(relative);
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
+        .join("tests")
+        .join("fixtures")
+        .join("configs")
         .join(relative)
 }
 
@@ -43,8 +46,9 @@ fn identical_genomes_collapse_into_one_species() {
     let mut population = BTreeMap::new();
     for key in 1..=5 {
         let mut genome = template.clone();
-        genome.key = key;
-        population.insert(key, genome);
+        let genome_id = GenomeId::new(key);
+        genome.key = genome_id;
+        population.insert(genome_id, genome);
     }
 
     let mut species = SpeciesSet::new();
@@ -54,6 +58,7 @@ fn identical_genomes_collapse_into_one_species() {
 
     assert_eq!(species.species.len(), 1);
     assert_eq!(species.genome_to_species.len(), population.len());
-    let assigned_species: BTreeSet<i64> = species.genome_to_species.values().copied().collect();
+    let assigned_species: BTreeSet<SpeciesId> =
+        species.genome_to_species.values().copied().collect();
     assert_eq!(assigned_species.len(), 1);
 }

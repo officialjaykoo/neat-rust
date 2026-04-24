@@ -4,15 +4,22 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use neat_rust::{
-    ActivationFunction, AggregationFunction, Config, Ctrnn, CtrnnNodeEval, DefaultConnectionGene,
-    DefaultGenome, DefaultNodeGene, FeedForwardError, FeedForwardNetwork, Iznn, NodeEval,
-    RecurrentError, RecurrentNetwork, RecurrentNodeEval, XorShiftRng,
+    ActivationFunction, AggregationFunction, Config, ConnectionKey, Ctrnn, CtrnnNodeEval,
+    DefaultConnectionGene, DefaultGenome, DefaultNodeGene, FeedForwardError, FeedForwardNetwork,
+    Iznn, NodeEval, RecurrentError, RecurrentNetwork, RecurrentNodeEval, XorShiftRng,
 };
 
 fn repo_path(relative: &str) -> PathBuf {
+    let relative = relative.strip_prefix("scripts/configs/").unwrap_or(relative);
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
+        .join("tests")
+        .join("fixtures")
+        .join("configs")
         .join(relative)
+}
+
+fn key(input: i64, output: i64) -> ConnectionKey {
+    ConnectionKey::new(input, output)
 }
 
 #[test]
@@ -26,8 +33,8 @@ fn feed_forward_network_computes_direct_outputs() {
         .expect("genome should configure");
 
     for node in genome.nodes.values_mut() {
-        node.activation = "identity".to_string();
-        node.aggregation = "sum".to_string();
+        node.activation = ActivationFunction::Identity;
+        node.aggregation = AggregationFunction::Sum;
         node.bias = 0.0;
         node.response = 1.0;
     }
@@ -35,12 +42,12 @@ fn feed_forward_network_computes_direct_outputs() {
         connection.enabled = false;
         connection.weight = 0.0;
     }
-    genome.connections.get_mut(&(-1, 0)).unwrap().enabled = true;
-    genome.connections.get_mut(&(-1, 0)).unwrap().weight = 2.0;
-    genome.connections.get_mut(&(-2, 0)).unwrap().enabled = true;
-    genome.connections.get_mut(&(-2, 0)).unwrap().weight = -1.0;
-    genome.connections.get_mut(&(-3, 1)).unwrap().enabled = true;
-    genome.connections.get_mut(&(-3, 1)).unwrap().weight = 0.5;
+    genome.connections.get_mut(&key(-1, 0)).unwrap().enabled = true;
+    genome.connections.get_mut(&key(-1, 0)).unwrap().weight = 2.0;
+    genome.connections.get_mut(&key(-2, 0)).unwrap().enabled = true;
+    genome.connections.get_mut(&key(-2, 0)).unwrap().weight = -1.0;
+    genome.connections.get_mut(&key(-3, 1)).unwrap().enabled = true;
+    genome.connections.get_mut(&key(-3, 1)).unwrap().weight = 0.5;
 
     let mut network =
         FeedForwardNetwork::create(&genome, &config.genome).expect("network should compile");
@@ -87,25 +94,25 @@ fn feed_forward_network_handles_orphaned_hidden_node_bias() {
     let mut output = DefaultNodeGene::new(0);
     output.bias = 0.5;
     output.response = 1.0;
-    output.activation = "sigmoid".to_string();
-    output.aggregation = "sum".to_string();
+    output.activation = ActivationFunction::Sigmoid;
+    output.aggregation = AggregationFunction::Sum;
     genome.nodes.insert(0, output);
 
     let mut other_output = DefaultNodeGene::new(1);
     other_output.bias = 0.0;
     other_output.response = 1.0;
-    other_output.activation = "identity".to_string();
-    other_output.aggregation = "sum".to_string();
+    other_output.activation = ActivationFunction::Identity;
+    other_output.aggregation = AggregationFunction::Sum;
     genome.nodes.insert(1, other_output);
 
     let mut hidden = DefaultNodeGene::new(2);
     hidden.bias = 2.0;
     hidden.response = 1.0;
-    hidden.activation = "sigmoid".to_string();
-    hidden.aggregation = "sum".to_string();
+    hidden.activation = ActivationFunction::Sigmoid;
+    hidden.aggregation = AggregationFunction::Sum;
     genome.nodes.insert(2, hidden);
 
-    let mut connection = DefaultConnectionGene::with_innovation((2, 0), 1);
+    let mut connection = DefaultConnectionGene::with_innovation(key(2, 0), 1);
     connection.weight = 1.0;
     connection.enabled = true;
     genome.connections.insert(connection.key, connection);
@@ -163,8 +170,8 @@ fn recurrent_network_uses_previous_state_for_self_loop() {
         .expect("genome should configure");
 
     for node in genome.nodes.values_mut() {
-        node.activation = "identity".to_string();
-        node.aggregation = "sum".to_string();
+        node.activation = ActivationFunction::Identity;
+        node.aggregation = AggregationFunction::Sum;
         node.bias = 0.0;
         node.response = 1.0;
         node.memory_gate_enabled = false;
@@ -173,10 +180,10 @@ fn recurrent_network_uses_previous_state_for_self_loop() {
         connection.enabled = false;
         connection.weight = 0.0;
     }
-    genome.connections.get_mut(&(-1, 0)).unwrap().enabled = true;
-    genome.connections.get_mut(&(-1, 0)).unwrap().weight = 1.0;
-    genome.connections.get_mut(&(0, 0)).unwrap().enabled = true;
-    genome.connections.get_mut(&(0, 0)).unwrap().weight = 0.5;
+    genome.connections.get_mut(&key(-1, 0)).unwrap().enabled = true;
+    genome.connections.get_mut(&key(-1, 0)).unwrap().weight = 1.0;
+    genome.connections.get_mut(&key(0, 0)).unwrap().enabled = true;
+    genome.connections.get_mut(&key(0, 0)).unwrap().weight = 0.5;
 
     let mut network =
         RecurrentNetwork::create(&genome, &config.genome).expect("network should compile");
@@ -202,8 +209,8 @@ fn ctrnn_uses_neat_python_21_exponential_euler_advance() {
         .expect("genome should configure");
 
     for node in genome.nodes.values_mut() {
-        node.activation = "identity".to_string();
-        node.aggregation = "sum".to_string();
+        node.activation = ActivationFunction::Identity;
+        node.aggregation = AggregationFunction::Sum;
         node.bias = 0.0;
         node.response = 1.0;
         node.time_constant = 1.0;
@@ -212,8 +219,8 @@ fn ctrnn_uses_neat_python_21_exponential_euler_advance() {
         connection.enabled = false;
         connection.weight = 0.0;
     }
-    genome.connections.get_mut(&(-1, 0)).unwrap().enabled = true;
-    genome.connections.get_mut(&(-1, 0)).unwrap().weight = 1.0;
+    genome.connections.get_mut(&key(-1, 0)).unwrap().enabled = true;
+    genome.connections.get_mut(&key(-1, 0)).unwrap().weight = 1.0;
 
     let mut network = Ctrnn::create(&genome, &config.genome).expect("ctrnn should compile");
     let first = network
@@ -251,8 +258,8 @@ fn iznn_spikes_and_resets_like_izhikevich_neuron() {
         connection.enabled = false;
         connection.weight = 0.0;
     }
-    genome.connections.get_mut(&(-1, 0)).unwrap().enabled = true;
-    genome.connections.get_mut(&(-1, 0)).unwrap().weight = 1.0;
+    genome.connections.get_mut(&key(-1, 0)).unwrap().enabled = true;
+    genome.connections.get_mut(&key(-1, 0)).unwrap().weight = 1.0;
 
     let mut network = Iznn::create(&genome, &config.genome).expect("iznn should compile");
     network
@@ -269,6 +276,7 @@ fn iznn_spikes_and_resets_like_izhikevich_neuron() {
 }
 
 #[test]
+#[ignore = "requires external neat-python fixture repo and Python launcher"]
 fn xor_feed_forward_fixture_matches_neat_python_21_master() {
     let run_python = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
@@ -377,6 +385,7 @@ print(",".join(format(value, ".17g") for value in values))
 }
 
 #[test]
+#[ignore = "requires external neat-python fixture repo and Python launcher"]
 fn ctrnn_fixture_matches_neat_python_21_master() {
     let run_python = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")

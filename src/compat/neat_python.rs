@@ -7,9 +7,9 @@ pub use crate::checkpoint::{CheckpointError, Checkpointer};
 pub use crate::config::{
     ActivationConfig, AggregationConfig, BoolAttributeConfig, CompatibilityExcessCoefficient,
     Config, ConfigError, ConnectionGeneConfig, FitnessCriterion, FitnessSharingMode,
-    FloatAttributeConfig, GenomeConfig, InitialConnection, InitialConnectionMode, NeatConfig,
-    ReproductionConfig, SpawnMethod, SpeciesFitnessFunction, SpeciesSetConfig, StagnationConfig,
-    StringAttributeConfig, StructuralMutationSurer, TargetNumSpecies,
+    FloatAttributeConfig, FloatInitType, GenomeConfig, InitialConnection, InitialConnectionMode,
+    NeatConfig, ReproductionConfig, SpawnMethod, SpeciesFitnessFunction, SpeciesSetConfig,
+    StagnationConfig, StringAttributeConfig, StructuralMutationSurer, TargetNumSpecies,
 };
 pub use crate::export_json::{export_genome_json, GenomeJsonOptions, NEAT_PYTHON_GENOME_FORMAT};
 

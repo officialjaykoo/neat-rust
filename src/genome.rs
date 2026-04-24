@@ -6,11 +6,12 @@ use crate::attributes::RandomSource;
 use crate::config::{FitnessCriterion, GenomeConfig, InitialConnectionMode};
 use crate::gene::{ConnectionKey, DefaultConnectionGene, DefaultNodeGene, GeneError, NodeKey};
 use crate::graph::{creates_cycle, required_for_output};
+use crate::ids::GenomeId;
 use crate::innovation::{InnovationTracker, MutationType};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DefaultGenome {
-    pub key: i64,
+    pub key: GenomeId,
     pub connections: BTreeMap<ConnectionKey, DefaultConnectionGene>,
     pub nodes: BTreeMap<NodeKey, DefaultNodeGene>,
     pub fitness: Option<f64>,
@@ -21,14 +22,14 @@ pub enum GenomeError {
     Gene(GeneError),
     EmptyChoice(&'static str),
     InvalidConnection(ConnectionKey),
-    MissingFitness(i64),
+    MissingFitness(GenomeId),
     UnsupportedInitialConnection(String),
 }
 
 impl DefaultGenome {
-    pub fn new(key: i64) -> Self {
+    pub fn new(key: impl Into<GenomeId>) -> Self {
         Self {
-            key,
+            key: key.into(),
             connections: BTreeMap::new(),
             nodes: BTreeMap::new(),
             fitness: None,
@@ -369,7 +370,8 @@ impl DefaultGenome {
             connection.enabled = false;
         }
 
-        let (input_id, output_id) = split_key;
+        let input_id = split_key.input;
+        let output_id = split_key.output;
         self.add_connection(config, input_id, new_node_id, 1.0, true, rng)?;
         self.add_connection(config, new_node_id, output_id, connection_weight, true, rng)?;
 
@@ -397,7 +399,7 @@ impl DefaultGenome {
             .connections
             .keys()
             .copied()
-            .filter(|(input, output)| *input == deleted || *output == deleted)
+            .filter(|key| key.input == deleted || key.output == deleted)
             .collect();
         for key in connections_to_delete {
             self.connections.remove(&key);
@@ -437,7 +439,8 @@ impl DefaultGenome {
             connection.enabled = false;
         }
 
-        let (input_id, output_id) = split_key;
+        let input_id = split_key.input;
+        let output_id = split_key.output;
         let in_innovation =
             tracker.get_innovation_number(input_id, new_node_id, MutationType::AddNodeIn);
         let out_innovation =
@@ -481,7 +484,7 @@ impl DefaultGenome {
         }
         let possible_inputs: Vec<NodeKey> = possible_inputs.into_iter().collect();
         let input_node = choose_node_key(&possible_inputs, rng, "possible_inputs")?;
-        let key = (input_node, output_node);
+        let key = ConnectionKey::new(input_node, output_node);
 
         if let Some(connection) = self.connections.get_mut(&key) {
             if check_structural_mutation_surer(config) {
@@ -525,7 +528,7 @@ impl DefaultGenome {
         }
         let possible_inputs: Vec<NodeKey> = possible_inputs.into_iter().collect();
         let input_node = choose_node_key(&possible_inputs, rng, "possible_inputs")?;
-        let key = (input_node, output_node);
+        let key = ConnectionKey::new(input_node, output_node);
 
         if let Some(connection) = self.connections.get_mut(&key) {
             if check_structural_mutation_surer(config) {
@@ -585,7 +588,9 @@ impl DefaultGenome {
         rng: &mut impl RandomSource,
     ) -> Result<(), GenomeError> {
         if output_id < 0 {
-            return Err(GenomeError::InvalidConnection((input_id, output_id)));
+            return Err(GenomeError::InvalidConnection(ConnectionKey::new(
+                input_id, output_id,
+            )));
         }
 
         let mut connection = Self::create_connection(config, input_id, output_id, rng)?;
@@ -606,7 +611,9 @@ impl DefaultGenome {
         rng: &mut impl RandomSource,
     ) -> Result<(), GenomeError> {
         if output_id < 0 {
-            return Err(GenomeError::InvalidConnection((input_id, output_id)));
+            return Err(GenomeError::InvalidConnection(ConnectionKey::new(
+                input_id, output_id,
+            )));
         }
 
         let mut connection =
@@ -640,7 +647,7 @@ impl DefaultGenome {
                 .connections
                 .keys()
                 .copied()
-                .filter(|(input, output)| *input == node_key || *output == node_key)
+                .filter(|key| key.input == node_key || key.output == node_key)
                 .collect();
             for connection_key in connections_to_remove {
                 self.connections.remove(&connection_key);
@@ -663,7 +670,7 @@ impl DefaultGenome {
         rng: &mut impl RandomSource,
     ) -> Result<DefaultConnectionGene, GenomeError> {
         Ok(DefaultConnectionGene::initialized(
-            (input_id, output_id),
+            ConnectionKey::new(input_id, output_id),
             config,
             rng,
         )?)
@@ -677,7 +684,7 @@ impl DefaultGenome {
         rng: &mut impl RandomSource,
     ) -> Result<DefaultConnectionGene, GenomeError> {
         Ok(DefaultConnectionGene::initialized_with_innovation(
-            (input_id, output_id),
+            ConnectionKey::new(input_id, output_id),
             innovation,
             config,
             rng,
@@ -708,12 +715,12 @@ impl DefaultGenome {
         if !hidden.is_empty() {
             for input_id in &input {
                 for hidden_id in &hidden {
-                    connections.push((*input_id, *hidden_id));
+                    connections.push(ConnectionKey::new(*input_id, *hidden_id));
                 }
             }
             for hidden_id in &hidden {
                 for output_id in &output {
-                    connections.push((*hidden_id, *output_id));
+                    connections.push(ConnectionKey::new(*hidden_id, *output_id));
                 }
             }
         }
@@ -721,14 +728,14 @@ impl DefaultGenome {
         if direct || hidden.is_empty() {
             for input_id in &input {
                 for output_id in &output {
-                    connections.push((*input_id, *output_id));
+                    connections.push(ConnectionKey::new(*input_id, *output_id));
                 }
             }
         }
 
         if !config.feed_forward {
             for node_id in self.nodes.keys() {
-                connections.push((*node_id, *node_id));
+                connections.push(ConnectionKey::new(*node_id, *node_id));
             }
         }
 
@@ -740,8 +747,8 @@ impl DefaultGenome {
         config: &GenomeConfig,
         rng: &mut impl RandomSource,
     ) -> Result<(), GenomeError> {
-        for (input_id, output_id) in self.compute_full_connections(config, false) {
-            let connection = Self::create_connection(config, input_id, output_id, rng)?;
+        for key in self.compute_full_connections(config, false) {
+            let connection = Self::create_connection(config, key.input, key.output, rng)?;
             self.connections.insert(connection.key, connection);
         }
         Ok(())
@@ -752,8 +759,8 @@ impl DefaultGenome {
         config: &GenomeConfig,
         rng: &mut impl RandomSource,
     ) -> Result<(), GenomeError> {
-        for (input_id, output_id) in self.compute_full_connections(config, true) {
-            let connection = Self::create_connection(config, input_id, output_id, rng)?;
+        for key in self.compute_full_connections(config, true) {
+            let connection = Self::create_connection(config, key.input, key.output, rng)?;
             self.connections.insert(connection.key, connection);
         }
         Ok(())
@@ -765,10 +772,10 @@ impl DefaultGenome {
         fraction: f64,
         rng: &mut impl RandomSource,
     ) -> Result<(), GenomeError> {
-        for (input_id, output_id) in
+        for key in
             choose_partial_connections(self.compute_full_connections(config, false), fraction, rng)
         {
-            let connection = Self::create_connection(config, input_id, output_id, rng)?;
+            let connection = Self::create_connection(config, key.input, key.output, rng)?;
             self.connections.insert(connection.key, connection);
         }
         Ok(())
@@ -780,10 +787,10 @@ impl DefaultGenome {
         fraction: f64,
         rng: &mut impl RandomSource,
     ) -> Result<(), GenomeError> {
-        for (input_id, output_id) in
+        for key in
             choose_partial_connections(self.compute_full_connections(config, true), fraction, rng)
         {
-            let connection = Self::create_connection(config, input_id, output_id, rng)?;
+            let connection = Self::create_connection(config, key.input, key.output, rng)?;
             self.connections.insert(connection.key, connection);
         }
         Ok(())
@@ -795,11 +802,14 @@ impl DefaultGenome {
         tracker: &mut InnovationTracker,
         rng: &mut impl RandomSource,
     ) -> Result<(), GenomeError> {
-        for (input_id, output_id) in self.compute_full_connections(config, false) {
-            let innovation =
-                tracker.get_innovation_number(input_id, output_id, MutationType::InitialConnection);
+        for key in self.compute_full_connections(config, false) {
+            let innovation = tracker.get_innovation_number(
+                key.input,
+                key.output,
+                MutationType::InitialConnection,
+            );
             let connection = Self::create_connection_with_innovation(
-                config, input_id, output_id, innovation, rng,
+                config, key.input, key.output, innovation, rng,
             )?;
             self.connections.insert(connection.key, connection);
         }
@@ -812,11 +822,14 @@ impl DefaultGenome {
         tracker: &mut InnovationTracker,
         rng: &mut impl RandomSource,
     ) -> Result<(), GenomeError> {
-        for (input_id, output_id) in self.compute_full_connections(config, true) {
-            let innovation =
-                tracker.get_innovation_number(input_id, output_id, MutationType::InitialConnection);
+        for key in self.compute_full_connections(config, true) {
+            let innovation = tracker.get_innovation_number(
+                key.input,
+                key.output,
+                MutationType::InitialConnection,
+            );
             let connection = Self::create_connection_with_innovation(
-                config, input_id, output_id, innovation, rng,
+                config, key.input, key.output, innovation, rng,
             )?;
             self.connections.insert(connection.key, connection);
         }
@@ -830,13 +843,16 @@ impl DefaultGenome {
         tracker: &mut InnovationTracker,
         rng: &mut impl RandomSource,
     ) -> Result<(), GenomeError> {
-        for (input_id, output_id) in
+        for key in
             choose_partial_connections(self.compute_full_connections(config, false), fraction, rng)
         {
-            let innovation =
-                tracker.get_innovation_number(input_id, output_id, MutationType::InitialConnection);
+            let innovation = tracker.get_innovation_number(
+                key.input,
+                key.output,
+                MutationType::InitialConnection,
+            );
             let connection = Self::create_connection_with_innovation(
-                config, input_id, output_id, innovation, rng,
+                config, key.input, key.output, innovation, rng,
             )?;
             self.connections.insert(connection.key, connection);
         }
@@ -850,13 +866,16 @@ impl DefaultGenome {
         tracker: &mut InnovationTracker,
         rng: &mut impl RandomSource,
     ) -> Result<(), GenomeError> {
-        for (input_id, output_id) in
+        for key in
             choose_partial_connections(self.compute_full_connections(config, true), fraction, rng)
         {
-            let innovation =
-                tracker.get_innovation_number(input_id, output_id, MutationType::InitialConnection);
+            let innovation = tracker.get_innovation_number(
+                key.input,
+                key.output,
+                MutationType::InitialConnection,
+            );
             let connection = Self::create_connection_with_innovation(
-                config, input_id, output_id, innovation, rng,
+                config, key.input, key.output, innovation, rng,
             )?;
             self.connections.insert(connection.key, connection);
         }
@@ -984,9 +1003,7 @@ impl fmt::Display for GenomeError {
         match self {
             Self::Gene(err) => write!(f, "{err}"),
             Self::EmptyChoice(name) => write!(f, "cannot choose from empty {name}"),
-            Self::InvalidConnection((input, output)) => {
-                write!(f, "invalid connection ({input}, {output})")
-            }
+            Self::InvalidConnection(key) => write!(f, "invalid connection {key}"),
             Self::MissingFitness(key) => write!(f, "missing fitness for genome {key}"),
             Self::UnsupportedInitialConnection(value) => {
                 write!(f, "unsupported initial_connection {value:?}")

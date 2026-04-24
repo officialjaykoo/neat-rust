@@ -8,8 +8,11 @@ use neat_rust::{
 };
 
 fn repo_path(relative: &str) -> PathBuf {
+    let relative = relative.strip_prefix("scripts/configs/").unwrap_or(relative);
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
+        .join("tests")
+        .join("fixtures")
+        .join("configs")
         .join(relative)
 }
 
@@ -24,7 +27,7 @@ fn runs_one_generation_with_synthetic_fitness() {
         .run(
             |genomes, _config| {
                 for genome in genomes.values_mut() {
-                    genome.fitness = Some(genome.key as f64);
+                    genome.fitness = Some(genome.key.raw() as f64);
                 }
                 Ok(())
             },
@@ -100,7 +103,7 @@ fn restored_post_evaluate_checkpoint_skips_duplicate_evaluation() {
         .run(
             |genomes, _config| {
                 for genome in genomes.values_mut() {
-                    genome.fitness = Some(genome.key as f64);
+                    genome.fitness = Some(genome.key.raw() as f64);
                 }
                 Ok(())
             },
@@ -117,7 +120,7 @@ fn restored_post_evaluate_checkpoint_skips_duplicate_evaluation() {
             |genomes, _config| {
                 eval_calls += 1;
                 for genome in genomes.values_mut() {
-                    genome.fitness = Some(genome.key as f64);
+                    genome.fitness = Some(genome.key.raw() as f64);
                 }
                 Ok(())
             },

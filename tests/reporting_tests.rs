@@ -2,11 +2,14 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use neat_rust::{Config, Population, Reporter, ReporterSet};
+use neat_rust::{Config, GenomeId, Population, Reporter, ReporterSet, SpeciesId};
 
 fn repo_path(relative: &str) -> PathBuf {
+    let relative = relative.strip_prefix("scripts/configs/").unwrap_or(relative);
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
+        .join("tests")
+        .join("fixtures")
+        .join("configs")
         .join(relative)
 }
 
@@ -85,7 +88,7 @@ impl Reporter for EventReporter {
     fn post_evaluate(
         &mut self,
         _config: &Config,
-        _population: &std::collections::BTreeMap<i64, neat_rust::DefaultGenome>,
+        _population: &std::collections::BTreeMap<GenomeId, neat_rust::DefaultGenome>,
         _species: &neat_rust::SpeciesSet,
         _best_genome: &neat_rust::DefaultGenome,
     ) {
@@ -95,7 +98,7 @@ impl Reporter for EventReporter {
     fn post_reproduction(
         &mut self,
         _config: &Config,
-        _population: &std::collections::BTreeMap<i64, neat_rust::DefaultGenome>,
+        _population: &std::collections::BTreeMap<GenomeId, neat_rust::DefaultGenome>,
         _species: &neat_rust::SpeciesSet,
     ) {
         self.events
@@ -120,7 +123,7 @@ impl Reporter for EventReporter {
             .push(format!("found_solution:{generation}"));
     }
 
-    fn species_stagnant(&mut self, _species_id: i64, _species: &neat_rust::Species) {
+    fn species_stagnant(&mut self, _species_id: SpeciesId, _species: &neat_rust::Species) {
         self.events
             .borrow_mut()
             .push("species_stagnant".to_string());

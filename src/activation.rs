@@ -105,6 +105,12 @@ impl ActivationFunction {
     }
 }
 
+impl fmt::Display for ActivationFunction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
 impl ActivationError {
     pub fn unknown(name: &str) -> Self {
         Self {
