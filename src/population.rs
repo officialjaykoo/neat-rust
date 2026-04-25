@@ -6,6 +6,7 @@ use std::sync::Arc;
 use crate::attributes::XorShiftRng;
 use crate::bootstrap::{BootstrapError, BootstrapStrategy};
 use crate::config::Config;
+use crate::epoch::{Epoch, EpochStopReason, GenerationStats};
 use crate::evaluator::BatchEvaluator;
 use crate::evolution::{
     sync_species_members, PopulationCheckpointError, PopulationCheckpointSink,
@@ -76,6 +77,7 @@ pub struct Population {
     pub species: SpeciesSet,
     pub generation: usize,
     pub best_genome: Option<DefaultGenome>,
+    pub last_generation_stats: Option<GenerationStats>,
     pub reproduction: ReproductionState,
     pub reporters: ReporterSet,
     pub checkpoint_sink: Option<Arc<dyn PopulationCheckpointSink>>,
@@ -97,6 +99,7 @@ impl Population {
             species,
             generation: 0,
             best_genome: None,
+            last_generation_stats: None,
             reproduction,
             reporters: ReporterSet::new(),
             checkpoint_sink: None,
@@ -123,6 +126,7 @@ impl Population {
             species,
             generation: 0,
             best_genome: None,
+            last_generation_stats: None,
             reproduction,
             reporters: ReporterSet::new(),
             checkpoint_sink: None,
@@ -147,6 +151,7 @@ impl Population {
             species,
             generation,
             best_genome,
+            last_generation_stats: None,
             reproduction,
             reporters: ReporterSet::new(),
             checkpoint_sink: None,
@@ -161,6 +166,10 @@ impl Population {
 
     pub fn add_reporter(&mut self, reporter: Box<dyn Reporter>) {
         self.reporters.add(reporter);
+    }
+
+    pub fn last_generation_stats(&self) -> Option<&GenerationStats> {
+        self.last_generation_stats.as_ref()
     }
 
     pub fn run<F>(
@@ -178,7 +187,7 @@ impl Population {
         let mut completed = 0;
         while generations.map(|limit| completed < limit).unwrap_or(true) {
             completed += 1;
-            if self.run_generation(&mut fitness_function)? {
+            if self.next_epoch(&mut fitness_function)?.should_stop() {
                 break;
             }
         }
@@ -207,10 +216,36 @@ impl Population {
         )
     }
 
+    pub fn next_epoch_with_evaluator<E>(
+        &mut self,
+        evaluator: &mut E,
+    ) -> Result<Epoch, PopulationError>
+    where
+        E: BatchEvaluator + ?Sized,
+    {
+        self.next_epoch(&mut |genomes, config| evaluator.evaluate_population(genomes, config))
+    }
+
+    pub fn next_epoch<F>(&mut self, fitness_function: &mut F) -> Result<Epoch, PopulationError>
+    where
+        F: FnMut(&mut BTreeMap<GenomeId, DefaultGenome>, &Config) -> FitnessResult,
+    {
+        let generation = self.generation;
+        let reached_threshold = self.run_generation(fitness_function)?;
+        let stop_reason = reached_threshold.then_some(EpochStopReason::FitnessThreshold);
+        Ok(Epoch::new(
+            generation,
+            self.last_generation_stats.clone(),
+            self.best_genome.clone(),
+            stop_reason,
+        ))
+    }
+
     fn run_generation<F>(&mut self, fitness_function: &mut F) -> Result<bool, PopulationError>
     where
         F: FnMut(&mut BTreeMap<GenomeId, DefaultGenome>, &Config) -> FitnessResult,
     {
+        self.last_generation_stats = None;
         self.reporters.start_generation(self.generation);
 
         if self.skip_first_evaluation {
@@ -238,6 +273,9 @@ impl Population {
         let best = summary.best_genome.clone();
         self.reporters
             .post_evaluate(&self.config, &self.population, &self.species, &best);
+        let stats = self.build_generation_stats(&summary);
+        self.reporters.post_generation_stats(&stats);
+        self.last_generation_stats = Some(stats);
 
         let improved = self
             .best_genome
@@ -266,6 +304,22 @@ impl Population {
         }
 
         Ok(false)
+    }
+
+    fn build_generation_stats(&self, summary: &PopulationFitnessSummary) -> GenerationStats {
+        let fitnesses: Vec<f64> = self.population.values().filter_map(|g| g.fitness).collect();
+        GenerationStats::new(
+            self.generation,
+            self.population.len(),
+            fitnesses.len(),
+            self.species.species.len(),
+            summary.best_genome.key,
+            self.species.get_species_id(summary.best_genome.key),
+            summary.best_genome.fitness.unwrap_or(0.0),
+            crate::reporting::mean(&fitnesses),
+            crate::reporting::stdev(&fitnesses),
+            summary.criterion_value,
+        )
     }
 
     fn save_generation_checkpoint(&mut self) -> Result<(), PopulationError> {

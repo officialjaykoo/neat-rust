@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::time::Instant;
 
 use crate::config::Config;
+use crate::epoch::GenerationStats;
 use crate::genome::DefaultGenome;
 use crate::ids::{GenomeId, SpeciesId};
 use crate::species::{Species, SpeciesSet};
@@ -25,6 +26,8 @@ pub trait Reporter {
         _best_genome: &DefaultGenome,
     ) {
     }
+
+    fn post_generation_stats(&mut self, _stats: &GenerationStats) {}
 
     fn post_reproduction(
         &mut self,
@@ -89,6 +92,12 @@ impl ReporterSet {
     ) {
         for reporter in &mut self.reporters {
             reporter.post_evaluate(config, population, species, best_genome);
+        }
+    }
+
+    pub fn post_generation_stats(&mut self, stats: &GenerationStats) {
+        for reporter in &mut self.reporters {
+            reporter.post_generation_stats(stats);
         }
     }
 
@@ -228,6 +237,17 @@ impl Reporter for StdOutReporter {
             best_genome.size(),
             species.get_species_id(best_genome.key).unwrap_or_default(),
             best_genome.key
+        );
+    }
+
+    fn post_generation_stats(&mut self, stats: &GenerationStats) {
+        println!(
+            "Generation stats: evaluated {}/{} - best {:.5} - mean {:.5} - criterion {:.5}",
+            stats.evaluated_count,
+            stats.population_size,
+            stats.best_fitness,
+            stats.mean_fitness,
+            stats.criterion_value
         );
     }
 

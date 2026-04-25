@@ -13,16 +13,20 @@ pub use crate::aggregation::{
     AggregationFunction, BUILTIN_AGGREGATIONS,
 };
 pub use crate::algorithm::{
-    BatchEvaluator, BootstrapStrategy, ChoiceAttribute, DefaultGenome, FitnessError,
-    FitnessEvaluator, FitnessResult, FitnessScore, FitnessScoreError, GenomeId, Population,
-    PopulationError, SpeciesId, XorShiftRng,
+    BatchEvaluator, BootstrapStrategy, ChoiceAttribute, CrossoverOperator,
+    DefaultCrossoverOperator, DefaultGenome, DefaultMutationOperator, Engine, Epoch,
+    EvolutionEngine, FitnessError, FitnessEvaluator, FitnessResult, FitnessScore,
+    FitnessScoreError, GenerationStats, GenomeId, GenomeProblem, MutationOperator, ParentSelector,
+    Population, PopulationError, PopulationProblem, ProblemEvaluator, SpeciesId, SurvivalSelector,
+    TruncationSurvivalSelector, UniformParentSelector, XorShiftRng,
 };
 pub use crate::io::{
     export_neat_genome_json, load_neat_config, restore_rust_checkpoint, Config, ConfigError,
     Probability,
 };
 pub use crate::network::{
-    FeedForwardNetwork, RecurrentConnectionEval, RecurrentConnectionState, RecurrentNetwork,
+    DecodedNetwork, FeedForwardNetwork, GenomeCodec, NetworkCodec, NetworkCodecError, NetworkKind,
+    RecurrentConnectionEval, RecurrentConnectionState, RecurrentNetwork,
 };
 #[cfg(feature = "policy-bridge")]
 pub use crate::runtime::{

@@ -15,7 +15,10 @@ mod aggregation;
 mod attributes;
 mod bootstrap;
 mod checkpoint;
+mod codec;
 mod config;
+mod engine;
+mod epoch;
 #[cfg(feature = "external-bridge")]
 mod eval_bridge;
 mod evaluator;
@@ -34,11 +37,14 @@ mod io_boundary;
 mod native;
 #[path = "network/mod.rs"]
 mod network_impl;
+mod operators;
 #[cfg(feature = "policy-bridge")]
 mod policy_bridge;
 mod population;
+mod problem;
 mod reporting;
 mod reproduction;
+mod selection;
 mod species;
 mod stagnation;
 mod statistics;
@@ -51,6 +57,8 @@ pub mod algorithm {
         AttributeError, BoolAttribute, ChoiceAttribute, FloatAttribute, RandomSource, XorShiftRng,
     };
     pub use crate::bootstrap::{BootstrapError, BootstrapStrategy, BootstrapSummary};
+    pub use crate::engine::{Engine, EvolutionEngine};
+    pub use crate::epoch::{Epoch, EpochStopReason, GenerationStats};
     pub use crate::evaluator::{BatchEvaluator, FitnessEvaluator};
     pub use crate::evolution::{
         sync_species_members, PopulationCheckpointError, PopulationCheckpointSink,
@@ -65,11 +73,21 @@ pub mod algorithm {
     pub use crate::graph::{creates_cycle, feed_forward_layers, required_for_output};
     pub use crate::ids::{GenomeId, SpeciesId};
     pub use crate::innovation::{InnovationTracker, MutationType};
+    pub use crate::operators::{
+        CrossoverOperator, DefaultCrossoverOperator, DefaultMutationOperator, MutationOperator,
+    };
     pub use crate::population::{FitnessError, FitnessResult, Population, PopulationError};
+    pub use crate::problem::{
+        BatchProblemEvaluator, GenomeProblem, PopulationProblem, ProblemEvaluator,
+    };
     pub use crate::reporting::{mean, median2, stdev, Reporter, ReporterSet, StdOutReporter};
     pub use crate::reproduction::{
         adjust_spawn_exact, compute_spawn, compute_spawn_proportional, ReproductionError,
         ReproductionState,
+    };
+    pub use crate::selection::{
+        sorted_members, ParentSelector, SurvivalSelector, TruncationSurvivalSelector,
+        UniformParentSelector,
     };
     pub use crate::species::{GenomeDistanceCache, Species, SpeciesSet};
     pub use crate::stagnation::{
@@ -80,6 +98,9 @@ pub mod algorithm {
 
 /// Executable neural network implementations.
 pub mod network {
+    pub use crate::codec::{
+        DecodedNetwork, GenomeCodec, NetworkCodec, NetworkCodecError, NetworkKind,
+    };
     pub use crate::network_impl::{
         Ctrnn, CtrnnError, CtrnnNodeEval, FeedForwardError, FeedForwardNetwork, IzNeuron, IzParams,
         Iznn, IznnError, NodeEval, RecurrentConnectionEval, RecurrentConnectionState,
@@ -140,9 +161,9 @@ pub mod bridge {
 }
 
 pub use algorithm::{
-    BatchEvaluator, BootstrapStrategy, DefaultGenome, FitnessError, FitnessEvaluator,
-    FitnessResult, FitnessScore, FitnessScoreError, GenomeId, Population, PopulationError,
-    SpeciesId,
+    BatchEvaluator, BootstrapStrategy, DefaultGenome, Engine, Epoch, EvolutionEngine, FitnessError,
+    FitnessEvaluator, FitnessResult, FitnessScore, FitnessScoreError, GenerationStats, GenomeId,
+    GenomeProblem, Population, PopulationError, PopulationProblem, ProblemEvaluator, SpeciesId,
 };
 #[cfg(feature = "external-bridge")]
 pub use bridge::{

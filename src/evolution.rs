@@ -13,6 +13,9 @@ use crate::reporting::mean;
 use crate::reproduction::{
     adjust_spawn_exact, compute_spawn, compute_spawn_proportional, ReproductionError,
 };
+use crate::selection::{
+    ParentSelector, SurvivalSelector, TruncationSurvivalSelector, UniformParentSelector,
+};
 use crate::species::{Species, SpeciesSet};
 use crate::stagnation::is_better_fitness;
 
@@ -161,10 +164,7 @@ impl SpawnPlanEntry {
         &'a self,
         rng: &mut impl RandomSource,
     ) -> Result<(&'a GenomeId, &'a DefaultGenome), ReproductionError> {
-        let index = rng
-            .next_index(self.parent_pool.len())
-            .ok_or(ReproductionError::EmptySpecies)?;
-        Ok((&self.parent_pool[index].0, &self.parent_pool[index].1))
+        UniformParentSelector.select(&self.parent_pool, rng)
     }
 }
 
@@ -244,36 +244,14 @@ fn build_parent_pools(
     species: &[Species],
     config: &Config,
 ) -> BTreeMap<SpeciesId, Vec<(GenomeId, DefaultGenome)>> {
+    let selector = TruncationSurvivalSelector;
     species
         .iter()
         .map(|species| {
-            let members = sorted_members(species, config);
-            let cutoff = ((config.reproduction.survival_threshold.value() * members.len() as f64)
-                .ceil() as usize)
-                .max(2)
-                .min(members.len());
-            (species.key, members.into_iter().take(cutoff).collect())
+            let members = selector.survivors(species, config);
+            (species.key, members)
         })
         .collect()
-}
-
-fn sorted_members(species: &Species, config: &Config) -> Vec<(GenomeId, DefaultGenome)> {
-    let mut members: Vec<(GenomeId, DefaultGenome)> = species
-        .members
-        .iter()
-        .map(|(key, genome)| (*key, genome.clone()))
-        .collect();
-    let ascending = config.neat.fitness_criterion.is_min();
-    members.sort_by(|a, b| {
-        let fa = a.1.fitness.unwrap_or(0.0);
-        let fb = b.1.fitness.unwrap_or(0.0);
-        if ascending {
-            fa.total_cmp(&fb).then_with(|| a.0.cmp(&b.0))
-        } else {
-            fb.total_cmp(&fa).then_with(|| a.0.cmp(&b.0))
-        }
-    });
-    members
 }
 
 fn population_fitness_criterion_value(criterion: &FitnessCriterion, values: &[f64]) -> f64 {

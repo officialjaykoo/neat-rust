@@ -8,6 +8,10 @@ use crate::evolution::SpawnPlan;
 use crate::genome::{DefaultGenome, GenomeError};
 use crate::ids::GenomeId;
 use crate::innovation::InnovationTracker;
+use crate::operators::{
+    CrossoverOperator, DefaultCrossoverOperator, DefaultMutationOperator, MutationOperator,
+};
+use crate::selection::sorted_members;
 use crate::species::{Species, SpeciesSet};
 use crate::stagnation::{species_fitness, DefaultStagnation};
 
@@ -103,6 +107,8 @@ impl ReproductionState {
             .reproduction
             .adaptive_mutation
             .adapted_genome_config(&config.genome, self.generations_without_improvement);
+        let crossover_operator = DefaultCrossoverOperator;
+        let mutation_operator = DefaultMutationOperator;
 
         let mut new_population = BTreeMap::new();
         species_set.species.clear();
@@ -145,14 +151,16 @@ impl ReproductionState {
                 };
                 let child_key = self.next_genome_key();
                 let mut child = DefaultGenome::new(child_key);
-                child.configure_crossover(
+                crossover_operator.crossover(
+                    &mut child,
                     parent1,
                     parent2,
                     &config.genome,
                     Some(&config.neat.fitness_criterion),
                     rng,
                 )?;
-                child.mutate_with_innovation(
+                mutation_operator.mutate(
+                    &mut child,
                     &mutation_config,
                     &mut self.innovation_tracker,
                     rng,
@@ -341,23 +349,4 @@ fn adjust_fitnesses(species: &mut [Species], all_fitnesses: &[f64], config: &Con
         }
         species.adjusted_fitness = Some(adjusted);
     }
-}
-
-fn sorted_members(species: &Species, config: &Config) -> Vec<(GenomeId, DefaultGenome)> {
-    let mut members: Vec<(GenomeId, DefaultGenome)> = species
-        .members
-        .iter()
-        .map(|(key, genome)| (*key, genome.clone()))
-        .collect();
-    let ascending = config.neat.fitness_criterion.is_min();
-    members.sort_by(|a, b| {
-        let fa = a.1.fitness.unwrap_or(0.0);
-        let fb = b.1.fitness.unwrap_or(0.0);
-        if ascending {
-            fa.total_cmp(&fb).then_with(|| a.0.cmp(&b.0))
-        } else {
-            fb.total_cmp(&fa).then_with(|| a.0.cmp(&b.0))
-        }
-    });
-    members
 }

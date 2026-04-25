@@ -2,11 +2,12 @@ use std::error::Error;
 
 use neat_rust::{
     algorithm::{
-        DefaultGenome, EvolutionEngine, FitnessError, GenomeId, GenomeProblem, Population,
-        ProblemEvaluator,
+        Engine, EpochStopReason, EvolutionEngine, FitnessError, GenerationStats, GenomeId,
+        GenomeProblem, Population, ProblemEvaluator,
     },
     io::Config,
     network::{GenomeCodec, NetworkCodec},
+    DefaultGenome,
 };
 
 struct XorProblem {
@@ -46,19 +47,26 @@ impl GenomeProblem for XorProblem {
     }
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
-    let config = Config::from_toml_str(include_str!("xor_config.toml"))?;
-    let population = Population::new(config, 100)?;
+#[test]
+fn evolution_engine_runs_problem_through_codec() -> Result<(), Box<dyn Error>> {
+    let config = Config::from_toml_str(include_str!("../examples/xor_config.toml"))?;
+    let population_size = config.neat.pop_size;
+    let population = Population::new(config, 42)?;
     let evaluator = ProblemEvaluator::new(XorProblem {
         codec: NetworkCodec::from_config(),
     });
-    let mut engine = EvolutionEngine::new(population, evaluator).with_generation_limit(20);
-    let best = engine.run()?.expect("population should keep a champion");
+    let mut engine = EvolutionEngine::new(population, evaluator).with_generation_limit(1);
 
-    println!(
-        "best_genome={} fitness={:.4}",
-        best.key,
-        best.fitness.unwrap_or(0.0)
-    );
+    let epoch = engine
+        .next_epoch()?
+        .expect("generation limit should still allow one epoch");
+    let stats: GenerationStats = epoch.stats.expect("epoch should include generation stats");
+
+    assert_eq!(epoch.stop_reason, Some(EpochStopReason::GenerationLimit));
+    assert_eq!(stats.generation, 0);
+    assert_eq!(stats.population_size, population_size);
+    assert_eq!(stats.evaluated_count, population_size);
+    assert!(stats.best_fitness.is_finite());
+    assert!(engine.next_epoch()?.is_none());
     Ok(())
 }
