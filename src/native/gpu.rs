@@ -354,7 +354,7 @@ mod imp {
     }
 
     fn compiled_ptx() -> Result<&'static str, GpuEvaluatorError> {
-        let cached = CUDA_PTX_CACHE.get_or_init(|| compile_ptx_to_string());
+        let cached = CUDA_PTX_CACHE.get_or_init(compile_ptx_to_string);
         match cached {
             Ok(ptx) => Ok(ptx.as_str()),
             Err(_message) => Err(GpuEvaluatorError::NativeBackendUnavailable),
@@ -461,11 +461,11 @@ mod imp {
         num_outputs: usize,
     ) -> Vec<OutputTrajectory> {
         let mut trajectories = vec![vec![vec![0.0; num_outputs]; num_steps]; population_size];
-        for genome_idx in 0..population_size {
-            for step in 0..num_steps {
+        for (genome_idx, trajectory) in trajectories.iter_mut().enumerate().take(population_size) {
+            for (step, step_outputs) in trajectory.iter_mut().enumerate().take(num_steps) {
                 let base = (genome_idx * num_steps + step) * num_outputs;
                 for output_idx in 0..num_outputs {
-                    trajectories[genome_idx][step][output_idx] = outputs[base + output_idx] as f64;
+                    step_outputs[output_idx] = outputs[base + output_idx] as f64;
                 }
             }
         }

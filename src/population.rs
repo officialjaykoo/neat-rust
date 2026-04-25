@@ -85,6 +85,17 @@ pub struct Population {
     rng: XorShiftRng,
 }
 
+pub(crate) struct CheckpointPopulationParts {
+    pub config: Config,
+    pub population: BTreeMap<GenomeId, DefaultGenome>,
+    pub species: SpeciesSet,
+    pub generation: usize,
+    pub best_genome: Option<DefaultGenome>,
+    pub reproduction: ReproductionState,
+    pub skip_first_evaluation: bool,
+    pub rng: XorShiftRng,
+}
+
 impl Population {
     pub fn new(config: Config, seed: u64) -> Result<Self, PopulationError> {
         let mut rng = XorShiftRng::seed_from_u64(seed);
@@ -135,28 +146,19 @@ impl Population {
         })
     }
 
-    pub(crate) fn from_checkpoint_parts(
-        config: Config,
-        population: BTreeMap<GenomeId, DefaultGenome>,
-        species: SpeciesSet,
-        generation: usize,
-        best_genome: Option<DefaultGenome>,
-        reproduction: ReproductionState,
-        skip_first_evaluation: bool,
-        rng: XorShiftRng,
-    ) -> Self {
+    pub(crate) fn from_checkpoint_parts(parts: CheckpointPopulationParts) -> Self {
         Self {
-            config,
-            population,
-            species,
-            generation,
-            best_genome,
+            config: parts.config,
+            population: parts.population,
+            species: parts.species,
+            generation: parts.generation,
+            best_genome: parts.best_genome,
             last_generation_stats: None,
-            reproduction,
+            reproduction: parts.reproduction,
             reporters: ReporterSet::new(),
             checkpoint_sink: None,
-            skip_first_evaluation,
-            rng,
+            skip_first_evaluation: parts.skip_first_evaluation,
+            rng: parts.rng,
         }
     }
 

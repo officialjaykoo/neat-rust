@@ -123,8 +123,9 @@ impl BridgeJsonArrayArg {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum BridgeOpponent {
+    #[default]
     None,
     Policy(String),
     Mix(BridgeJsonArrayArg),
@@ -170,12 +171,6 @@ impl BridgeOpponent {
     }
 }
 
-impl Default for BridgeOpponent {
-    fn default() -> Self {
-        Self::None
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BridgeSeat {
     Ai,
@@ -201,8 +196,9 @@ impl BridgeSeat {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BridgeTurnPolicy {
+    #[default]
     Alternate,
     Fixed(BridgeSeat),
 }
@@ -250,12 +246,6 @@ impl BridgeTurnPolicy {
     }
 }
 
-impl Default for BridgeTurnPolicy {
-    fn default() -> Self {
-        Self::Alternate
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct BridgeEarlyStopConfig {
     pub win_rate_cutoffs: Option<BridgeJsonArrayArg>,
@@ -292,8 +282,9 @@ impl BridgeEarlyStopConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum BridgeNativeInferenceBackend {
+    #[default]
     Off,
     Named(String),
 }
@@ -315,12 +306,6 @@ impl BridgeNativeInferenceBackend {
             Self::Off => None,
             Self::Named(value) => Some(value.as_str()),
         }
-    }
-}
-
-impl Default for BridgeNativeInferenceBackend {
-    fn default() -> Self {
-        Self::Off
     }
 }
 

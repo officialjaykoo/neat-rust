@@ -449,7 +449,7 @@ where
             }
         }
 
-        for genome_idx in 0..population_size {
+        for (genome_idx, input_row) in inputs.iter().enumerate().take(population_size) {
             for dst_idx in 0..packed.max_nodes {
                 let flat_idx = node_idx(genome_idx, dst_idx, packed.max_nodes);
                 if !packed.node_mask[flat_idx] {
@@ -458,7 +458,10 @@ where
                 }
 
                 if dst_idx < packed.num_inputs {
-                    next_state[flat_idx] = inputs[genome_idx][dst_idx];
+                    next_state[flat_idx] = input_row
+                        .get(dst_idx)
+                        .copied()
+                        .expect("expanded input row has validated input count");
                     continue;
                 }
 
@@ -487,16 +490,19 @@ where
             }
 
             for input_idx in 0..packed.num_inputs {
-                next_state[node_idx(genome_idx, input_idx, packed.max_nodes)] =
-                    inputs[genome_idx][input_idx];
+                next_state[node_idx(genome_idx, input_idx, packed.max_nodes)] = input_row
+                    .get(input_idx)
+                    .copied()
+                    .expect("expanded input row has validated input count");
             }
         }
 
         std::mem::swap(&mut state, &mut next_state);
 
-        for genome_idx in 0..population_size {
+        for (genome_idx, trajectory) in trajectories.iter_mut().enumerate().take(population_size) {
+            let step_outputs = &mut trajectory[step];
             for output_idx in 0..packed.num_outputs {
-                trajectories[genome_idx][step][output_idx] =
+                step_outputs[output_idx] =
                     state[node_idx(genome_idx, packed.num_inputs + output_idx, packed.max_nodes)];
             }
         }
@@ -575,9 +581,10 @@ where
             }
         }
 
-        for genome_idx in 0..population_size {
+        for (genome_idx, trajectory) in trajectories.iter_mut().enumerate().take(population_size) {
+            let step_outputs = &mut trajectory[step];
             for output_idx in 0..packed.num_outputs {
-                trajectories[genome_idx][step][output_idx] =
+                step_outputs[output_idx] =
                     fired[node_idx(genome_idx, packed.num_inputs + output_idx, packed.max_nodes)];
             }
         }

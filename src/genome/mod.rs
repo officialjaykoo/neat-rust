@@ -20,6 +20,15 @@ pub struct DefaultGenome {
     pub fitness: Option<f64>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct InnovationConnectionSpec {
+    pub input_id: NodeKey,
+    pub output_id: NodeKey,
+    pub weight: f64,
+    pub enabled: bool,
+    pub innovation: i64,
+}
+
 impl DefaultGenome {
     pub fn new(key: impl Into<GenomeId>) -> Self {
         Self {
@@ -518,20 +527,24 @@ impl DefaultGenome {
             tracker.get_innovation_number(new_node_id, output_id, MutationType::AddNodeOut);
         self.add_connection_with_innovation(
             config,
-            input_id,
-            new_node_id,
-            1.0,
-            true,
-            in_innovation,
+            InnovationConnectionSpec {
+                input_id,
+                output_id: new_node_id,
+                weight: 1.0,
+                enabled: true,
+                innovation: in_innovation,
+            },
             rng,
         )?;
         self.add_connection_with_innovation(
             config,
-            new_node_id,
-            output_id,
-            connection_weight,
-            true,
-            out_innovation,
+            InnovationConnectionSpec {
+                input_id: new_node_id,
+                output_id,
+                weight: connection_weight,
+                enabled: true,
+                innovation: out_innovation,
+            },
             rng,
         )?;
 
@@ -674,23 +687,25 @@ impl DefaultGenome {
     pub fn add_connection_with_innovation(
         &mut self,
         config: &GenomeConfig,
-        input_id: NodeKey,
-        output_id: NodeKey,
-        weight: f64,
-        enabled: bool,
-        innovation: i64,
+        spec: InnovationConnectionSpec,
         rng: &mut impl RandomSource,
     ) -> Result<(), GenomeError> {
-        if output_id < 0 {
+        if spec.output_id < 0 {
             return Err(GenomeError::InvalidConnection(ConnectionKey::new(
-                input_id, output_id,
+                spec.input_id,
+                spec.output_id,
             )));
         }
 
-        let mut connection =
-            Self::create_connection_with_innovation(config, input_id, output_id, innovation, rng)?;
-        connection.weight = weight;
-        connection.enabled = enabled;
+        let mut connection = Self::create_connection_with_innovation(
+            config,
+            spec.input_id,
+            spec.output_id,
+            spec.innovation,
+            rng,
+        )?;
+        connection.weight = spec.weight;
+        connection.enabled = spec.enabled;
         self.connections.insert(connection.key, connection);
         Ok(())
     }

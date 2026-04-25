@@ -16,9 +16,10 @@ pub use crate::algorithm::{
     BatchEvaluator, BootstrapStrategy, ChoiceAttribute, CrossoverOperator,
     DefaultCrossoverOperator, DefaultGenome, DefaultMutationOperator, Engine, Epoch,
     EvolutionEngine, FitnessError, FitnessEvaluator, FitnessResult, FitnessScore,
-    FitnessScoreError, GenerationStats, GenomeId, GenomeProblem, MutationOperator, ParentSelector,
-    Population, PopulationError, PopulationProblem, ProblemEvaluator, SpeciesId, SurvivalSelector,
-    TruncationSurvivalSelector, UniformParentSelector, XorShiftRng,
+    FitnessScoreError, GenerationStats, GenomeId, GenomeProblem, InnovationConnectionSpec,
+    MutationOperator, ParentSelector, Population, PopulationError, PopulationProblem,
+    ProblemEvaluator, SpeciesId, SurvivalSelector, TruncationSurvivalSelector,
+    UniformParentSelector, XorShiftRng,
 };
 pub use crate::io::{
     export_neat_genome_json, load_neat_config, restore_rust_checkpoint, Config, ConfigError,

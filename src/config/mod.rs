@@ -3,6 +3,7 @@ use std::fmt;
 use std::fs;
 use std::ops::{Add, AddAssign, Div};
 use std::path::Path;
+use std::str::FromStr;
 
 use serde::de::{self, Visitor};
 use serde::Deserialize;
@@ -443,7 +444,7 @@ impl SpeciesFitnessFunction {
                 let mut sorted = values.to_vec();
                 sorted.sort_by(|a, b| a.total_cmp(b));
                 let mid = sorted.len() / 2;
-                if sorted.len() % 2 == 0 {
+                if sorted.len().is_multiple_of(2) {
                     (sorted[mid - 1] + sorted[mid]) / 2.0
                 } else {
                     sorted[mid]
@@ -832,10 +833,6 @@ impl Config {
         Self::from_toml_str(&text)
     }
 
-    pub fn from_str(text: &str) -> Result<Self, ConfigError> {
-        Self::from_toml_str(text)
-    }
-
     pub fn from_toml_str(text: &str) -> Result<Self, ConfigError> {
         let config = TomlConfigDocument::from_str(text)?.into_config()?;
         config.validate()?;
@@ -1014,6 +1011,14 @@ impl Config {
             }
         }
         Ok(())
+    }
+}
+
+impl FromStr for Config {
+    type Err = ConfigError;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        Self::from_toml_str(text)
     }
 }
 

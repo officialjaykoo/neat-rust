@@ -125,7 +125,9 @@ fn config_validation_rejects_zero_population() {
     let text = std::fs::read_to_string(path).expect("config should read");
     let text = text.replace("pop_size = 72", "pop_size = 0");
 
-    let err = Config::from_str(&text).expect_err("zero population must fail");
+    let err = text
+        .parse::<Config>()
+        .expect_err("zero population must fail");
 
     assert!(err.to_string().contains("pop_size"));
 }

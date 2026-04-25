@@ -36,9 +36,8 @@ fn parses_recurrent_memory8_config() {
         .genome
         .activation
         .options
-        .iter()
-        .any(|x| *x == ActivationFunction::Identity));
-    assert_eq!(config.genome.memory_gate_enabled.default, false);
+        .contains(&ActivationFunction::Identity));
+    assert!(!config.genome.memory_gate_enabled.default);
     assert_eq!(
         config.genome.memory_gate_enabled.mutate_rate,
         Probability::new(0.02)
@@ -96,7 +95,7 @@ fn parses_feedforward_memory8_config_without_memory_gate_keys() {
     assert_eq!(config.genome.num_inputs, 8);
     assert_eq!(config.genome.num_outputs, 2);
     assert!(config.genome.feed_forward);
-    assert_eq!(config.genome.memory_gate_enabled.default, false);
+    assert!(!config.genome.memory_gate_enabled.default);
     assert_eq!(
         config.genome.memory_gate_enabled.mutate_rate,
         Probability::zero()

@@ -489,9 +489,11 @@ mod imp {
     }
 
     fn policy_shared_bytes(node_count: usize) -> Result<usize, NativePolicyGpuError> {
-        Ok(node_count.checked_mul(mem::size_of::<f32>()).ok_or(
-            NativePolicyGpuError::BufferOverflow("policy CUDA shared memory"),
-        )?)
+        node_count
+            .checked_mul(mem::size_of::<f32>())
+            .ok_or(NativePolicyGpuError::BufferOverflow(
+                "policy CUDA shared memory",
+            ))
     }
 
     struct PackedPolicyModel {

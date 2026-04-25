@@ -69,7 +69,9 @@ pub mod algorithm {
     pub use crate::gene::{
         ConnectionKey, DefaultConnectionGene, DefaultNodeGene, GeneError, NodeKey,
     };
-    pub use crate::genome::{input_keys, output_keys, DefaultGenome, GenomeError};
+    pub use crate::genome::{
+        input_keys, output_keys, DefaultGenome, GenomeError, InnovationConnectionSpec,
+    };
     pub use crate::graph::{creates_cycle, feed_forward_layers, required_for_output};
     pub use crate::ids::{GenomeId, SpeciesId};
     pub use crate::innovation::{InnovationTracker, MutationType};
@@ -163,7 +165,8 @@ pub mod bridge {
 pub use algorithm::{
     BatchEvaluator, BootstrapStrategy, DefaultGenome, Engine, Epoch, EvolutionEngine, FitnessError,
     FitnessEvaluator, FitnessResult, FitnessScore, FitnessScoreError, GenerationStats, GenomeId,
-    GenomeProblem, Population, PopulationError, PopulationProblem, ProblemEvaluator, SpeciesId,
+    GenomeProblem, InnovationConnectionSpec, Population, PopulationError, PopulationProblem,
+    ProblemEvaluator, SpeciesId,
 };
 #[cfg(feature = "external-bridge")]
 pub use bridge::{

@@ -180,9 +180,10 @@ impl fmt::Display for PolicyIncomingSource {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PolicyActivation {
     Sigmoid,
+    #[default]
     Tanh,
     Relu,
     Identity,
@@ -248,12 +249,6 @@ impl PolicyActivation {
     }
 }
 
-impl Default for PolicyActivation {
-    fn default() -> Self {
-        Self::Tanh
-    }
-}
-
 impl Serialize for PolicyActivation {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -273,8 +268,9 @@ impl<'de> Deserialize<'de> for PolicyActivation {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PolicyAggregation {
+    #[default]
     Sum,
     Mean,
     Max,
@@ -333,12 +329,6 @@ impl PolicyAggregation {
                 best
             }
         }
-    }
-}
-
-impl Default for PolicyAggregation {
-    fn default() -> Self {
-        Self::Sum
     }
 }
 

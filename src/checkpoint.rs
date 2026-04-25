@@ -14,7 +14,7 @@ use crate::gene::{ConnectionKey, DefaultConnectionGene, DefaultNodeGene};
 use crate::genome::DefaultGenome;
 use crate::ids::{GenomeId, SpeciesId};
 use crate::innovation::InnovationTracker;
-use crate::population::Population;
+use crate::population::{CheckpointPopulationParts, Population};
 use crate::reproduction::ReproductionState;
 use crate::species::{Species, SpeciesSet};
 
@@ -51,7 +51,7 @@ impl Checkpointer {
 
     pub fn should_save(&self, generation: usize) -> bool {
         self.generation_interval
-            .map(|interval| interval > 0 && (generation + 1) % interval == 0)
+            .map(|interval| interval > 0 && (generation + 1).is_multiple_of(interval))
             .unwrap_or(false)
     }
 
@@ -188,14 +188,16 @@ impl CheckpointDocument {
         let reproduction = self.reproduction.into_state();
 
         Ok(Population::from_checkpoint_parts(
-            config,
-            population,
-            species_set,
-            self.generation,
-            best_genome,
-            reproduction,
-            self.skip_first_evaluation,
-            XorShiftRng::from_state(self.rng_state),
+            CheckpointPopulationParts {
+                config,
+                population,
+                species: species_set,
+                generation: self.generation,
+                best_genome,
+                reproduction,
+                skip_first_evaluation: self.skip_first_evaluation,
+                rng: XorShiftRng::from_state(self.rng_state),
+            },
         ))
     }
 }

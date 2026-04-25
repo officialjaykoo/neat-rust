@@ -55,10 +55,10 @@ pub enum EvalBridgeError {
     InvalidTurnPolicy(String),
     CommandIo(std::io::Error),
     WorkerTimeout {
-        output: EvalBridgeOutput,
+        output: Box<EvalBridgeOutput>,
         timeout_millis: u64,
     },
-    WorkerFailed(EvalBridgeOutput),
+    WorkerFailed(Box<EvalBridgeOutput>),
 }
 
 impl fmt::Display for EvalBridgeError {
@@ -166,13 +166,13 @@ pub fn run_external_eval_worker(
 
     if output.timed_out {
         Err(EvalBridgeError::WorkerTimeout {
-            output: result,
+            output: Box::new(result),
             timeout_millis: timeout_millis(options.timeout),
         })
     } else if output.success {
         Ok(result)
     } else {
-        Err(EvalBridgeError::WorkerFailed(result))
+        Err(EvalBridgeError::WorkerFailed(Box::new(result)))
     }
 }
 

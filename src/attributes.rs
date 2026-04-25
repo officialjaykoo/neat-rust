@@ -34,10 +34,7 @@ pub trait RandomSource {
             return mean;
         }
 
-        let u1 = self
-            .next_f64()
-            .max(f64::MIN_POSITIVE)
-            .min(1.0 - f64::EPSILON);
+        let u1 = self.next_f64().clamp(f64::MIN_POSITIVE, 1.0 - f64::EPSILON);
         let u2 = self.next_f64().clamp(0.0, 1.0 - f64::EPSILON);
         let z0 = (-2.0 * u1.ln()).sqrt() * (2.0 * PI * u2).cos();
         mean + (stdev * z0)
@@ -137,7 +134,7 @@ impl FloatAttribute {
     }
 
     pub fn clamp(value: f64, config: &FloatAttributeConfig) -> f64 {
-        value.max(config.min_value).min(config.max_value)
+        value.clamp(config.min_value, config.max_value)
     }
 
     pub fn init_value(

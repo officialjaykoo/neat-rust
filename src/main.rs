@@ -34,8 +34,7 @@ fn run() -> Result<(), String> {
         let seed = arg_value(&args, "--seed")
             .and_then(|value| value.parse::<u64>().ok())
             .unwrap_or(1);
-        let feature_profile =
-            arg_value(&args, "--feature-profile").unwrap_or_else(|| "".to_string());
+        let feature_profile = arg_value(&args, "--feature-profile").unwrap_or_default();
         let mut rng = XorShiftRng::seed_from_u64(seed);
         let mut genome = DefaultGenome::new(0);
         genome
@@ -47,7 +46,7 @@ fn run() -> Result<(), String> {
                 fs::create_dir_all(parent).map_err(|err| err.to_string())?;
             }
         }
-        fs::write(&out_path, json).map_err(|err| err.to_string())?;
+        fs::write(out_path, json).map_err(|err| err.to_string())?;
         println!("genome_nodes={}", genome.nodes.len());
         println!("genome_connections={}", genome.connections.len());
         println!("out={out_path}");
