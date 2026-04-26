@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use neat_rust::{
     algorithm::{ConnectionKey, DefaultConnectionGene, DefaultNodeGene, RandomSource},
-    io::{Config, GenomeConfig},
+    io::{Config, GenomeConfig, NodeMemoryKind},
     prelude::{ActivationFunction, AggregationFunction},
 };
 
@@ -59,8 +59,8 @@ fn initializes_node_gene_from_config() {
     let mut rng = SequenceRng::new(&[
         0.5, 0.0, // bias gaussian: mean value
         0.5, 0.0, // response gaussian: stdev 0
-        0.5, 0.0, // memory gate bias gaussian: mean value
-        0.5, 0.0, // memory gate response gaussian: mean value
+        0.5, 0.0, 0.5, 0.0, 0.5, 0.0, 0.5, 0.0, 0.5, 0.0, 0.5, 0.0, 0.5, 0.0, 0.5, 0.0, 0.5, 0.0,
+        0.5, 0.0, 0.5, 0.0, 0.5, 0.0, 0.5, 0.0, 0.5, 0.0, 0.5, 0.0, 0.5, 0.0, 0.5, 0.0, 0.5, 0.0,
     ]);
 
     let gene =
@@ -75,14 +75,14 @@ fn initializes_node_gene_from_config() {
     assert_eq!(gene.iz_b, 0.20);
     assert_eq!(gene.iz_c, -65.0);
     assert_eq!(gene.iz_d, 8.0);
-    assert!(!gene.memory_gate_enabled);
+    assert_eq!(gene.node_memory_kind, NodeMemoryKind::None);
     assert!(
-        gene.memory_gate_bias >= config.memory_gate_bias.min_value
-            && gene.memory_gate_bias <= config.memory_gate_bias.max_value
+        gene.node_hebbian_decay >= config.node_hebbian_decay.min_value
+            && gene.node_hebbian_decay <= config.node_hebbian_decay.max_value
     );
     assert!(
-        gene.memory_gate_response >= config.memory_gate_response.min_value
-            && gene.memory_gate_response <= config.memory_gate_response.max_value
+        gene.node_linear_gate_response >= config.node_linear_gate_response.min_value
+            && gene.node_linear_gate_response <= config.node_linear_gate_response.max_value
     );
 }
 
@@ -112,9 +112,10 @@ fn node_gene_crossover_inherits_each_attribute_independently() {
         iz_b: 0.20,
         iz_c: -65.0,
         iz_d: 8.0,
-        memory_gate_enabled: true,
-        memory_gate_bias: 3.0,
-        memory_gate_response: 4.0,
+        node_memory_kind: NodeMemoryKind::NodeGru,
+        node_hebbian_eta: 3.0,
+        node_linear_gate_response: 4.0,
+        ..DefaultNodeGene::new(1)
     };
     let right = DefaultNodeGene {
         key: 1,
@@ -127,11 +128,15 @@ fn node_gene_crossover_inherits_each_attribute_independently() {
         iz_b: 0.25,
         iz_c: -55.0,
         iz_d: 4.0,
-        memory_gate_enabled: false,
-        memory_gate_bias: -3.0,
-        memory_gate_response: -4.0,
+        node_memory_kind: NodeMemoryKind::Hebbian,
+        node_hebbian_eta: -3.0,
+        node_linear_gate_response: -4.0,
+        ..DefaultNodeGene::new(1)
     };
-    let mut rng = SequenceRng::new(&[0.9, 0.1, 0.9, 0.1, 0.9, 0.1, 0.9, 0.1, 0.9, 0.9, 0.1, 0.9]);
+    let mut rng = SequenceRng::new(&[
+        0.9, 0.1, 0.9, 0.1, 0.9, 0.1, 0.9, 0.1, 0.9, 0.9, 0.1, 0.9, 0.9, 0.1, 0.9, 0.1, 0.9, 0.1,
+        0.9, 0.1, 0.9, 0.1, 0.9, 0.1, 0.9, 0.1, 0.9, 0.1, 0.9, 0.1, 0.9, 0.1, 0.9, 0.1, 0.9, 0.1,
+    ]);
 
     let child = left
         .crossover(&right, &mut rng)
@@ -146,9 +151,9 @@ fn node_gene_crossover_inherits_each_attribute_independently() {
     assert_eq!(child.iz_b, 0.20);
     assert_eq!(child.iz_c, -55.0);
     assert_eq!(child.iz_d, 8.0);
-    assert!(child.memory_gate_enabled);
-    assert_eq!(child.memory_gate_bias, -3.0);
-    assert_eq!(child.memory_gate_response, 4.0);
+    assert_eq!(child.node_memory_kind, NodeMemoryKind::NodeGru);
+    assert_eq!(child.node_hebbian_eta, 3.0);
+    assert_eq!(child.node_linear_gate_response, 4.0);
 }
 
 #[test]
@@ -159,13 +164,13 @@ fn connection_gene_crossover_applies_disable_rule() {
     let mut right = DefaultConnectionGene::new(key(-1, 0));
     right.weight = -1.5;
     right.enabled = false;
-    let mut rng = SequenceRng::new(&[0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.1]);
+    let mut rng = SequenceRng::new(&[0.1, 0.1, 0.1]);
 
     let child = left
         .crossover(&right, &mut rng)
         .expect("matching connection keys should crossover");
 
-    assert_eq!(child.weight, 1.5);
+    assert_eq!(child.weight, -1.5);
     assert!(!child.enabled);
 }
 
@@ -183,9 +188,8 @@ fn gene_distance_uses_config_weight_coefficient() {
         iz_b: 0.20,
         iz_c: -65.0,
         iz_d: 8.0,
-        memory_gate_enabled: false,
-        memory_gate_bias: 0.0,
-        memory_gate_response: 1.0,
+        node_memory_kind: NodeMemoryKind::None,
+        ..DefaultNodeGene::new(0)
     };
     let node_right = DefaultNodeGene {
         key: 0,
@@ -198,9 +202,8 @@ fn gene_distance_uses_config_weight_coefficient() {
         iz_b: 0.20,
         iz_c: -65.0,
         iz_d: 8.0,
-        memory_gate_enabled: false,
-        memory_gate_bias: 0.0,
-        memory_gate_response: 1.0,
+        node_memory_kind: NodeMemoryKind::None,
+        ..DefaultNodeGene::new(0)
     };
     let mut conn_left = DefaultConnectionGene::new(key(-1, 0));
     conn_left.weight = 0.25;

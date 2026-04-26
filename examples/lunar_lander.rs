@@ -39,16 +39,16 @@ struct LunarLanderEvaluator;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LanderConfigProfile {
     Plain,
-    ConnectionGru,
+    NodeGru,
 }
 
 impl LanderConfigProfile {
     fn parse(value: Option<&str>) -> Result<Self, String> {
         match value.unwrap_or("plain").to_ascii_lowercase().as_str() {
             "plain" | "base" | "no-gru" | "no_gru" => Ok(Self::Plain),
-            "gru" | "connection-gru" | "connection_gru" => Ok(Self::ConnectionGru),
+            "gru" | "node-gru" | "node_gru" | "nodegru" => Ok(Self::NodeGru),
             other => Err(format!(
-                "unknown lunar lander config profile {other:?}; use plain or connection-gru"
+                "unknown lunar lander config profile {other:?}; use plain or node-gru"
             )),
         }
     }
@@ -56,14 +56,14 @@ impl LanderConfigProfile {
     fn name(self) -> &'static str {
         match self {
             Self::Plain => "plain",
-            Self::ConnectionGru => "connection-gru",
+            Self::NodeGru => "node-gru",
         }
     }
 
     fn config_text(self) -> &'static str {
         match self {
             Self::Plain => include_str!("lunar_lander_config.toml"),
-            Self::ConnectionGru => include_str!("lunar_lander_connection_gru_config.toml"),
+            Self::NodeGru => include_str!("lunar_lander_node_gru_config.toml"),
         }
     }
 }

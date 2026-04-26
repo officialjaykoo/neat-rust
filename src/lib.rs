@@ -105,10 +105,11 @@ pub mod network {
     };
     pub use crate::network_impl::{
         Ctrnn, CtrnnError, CtrnnNodeEval, FeedForwardError, FeedForwardNetwork, IzNeuron, IzParams,
-        Iznn, IznnError, NodeEval, RecurrentConnectionEval, RecurrentConnectionState,
-        RecurrentError, RecurrentNetwork, RecurrentNodeEval, CHATTERING_PARAMS,
-        FAST_SPIKING_PARAMS, INTRINSICALLY_BURSTING_PARAMS, LOW_THRESHOLD_SPIKING_PARAMS,
-        REGULAR_SPIKING_PARAMS, RESONATOR_PARAMS, THALAMO_CORTICAL_PARAMS,
+        Iznn, IznnError, NodeEval, NodeGruMemory, NodeHebbianMemory, NodeLinearGateMemory,
+        NodeLinearGateV2Memory, RecurrentConnectionEval, RecurrentError, RecurrentNetwork,
+        RecurrentNodeEval, RecurrentNodeMemory, CHATTERING_PARAMS, FAST_SPIKING_PARAMS,
+        INTRINSICALLY_BURSTING_PARAMS, LOW_THRESHOLD_SPIKING_PARAMS, REGULAR_SPIKING_PARAMS,
+        RESONATOR_PARAMS, THALAMO_CORTICAL_PARAMS,
     };
 }
 
@@ -120,9 +121,9 @@ pub mod io {
         ChoiceAttributeConfig, ChoiceAttributeDefault, CompatibilityExcessCoefficient, Config,
         ConfigChoice, ConfigError, ConnectionGeneConfig, FitnessCriterion, FitnessSharingMode,
         FloatAttributeConfig, FloatInitType, GenomeConfig, InitialConnection,
-        InitialConnectionMode, MutationRateCaps, NeatConfig, Probability, ReproductionConfig,
-        SpawnMethod, SpeciesFitnessFunction, SpeciesSetConfig, StagnationConfig,
-        StructuralMutationSurer, TargetNumSpecies,
+        InitialConnectionMode, MutationRateCaps, NeatConfig, NodeGruTopology, NodeHebbianRule,
+        NodeMemoryKind, Probability, ReproductionConfig, SpawnMethod, SpeciesFitnessFunction,
+        SpeciesSetConfig, StagnationConfig, StructuralMutationSurer, TargetNumSpecies,
     };
     pub use crate::export::{export_genome_json, GenomeJsonOptions, NEAT_GENOME_FORMAT};
     pub use crate::io_boundary::{
@@ -143,11 +144,12 @@ pub mod runtime {
     #[cfg(feature = "policy-bridge")]
     pub use crate::policy_bridge::{
         evaluate_policy_batch, native_policy_cuda_available, AutoPolicyEvaluator,
-        CompiledPolicyNodeEval, CompiledPolicyRequest, CompiledPolicyResult,
-        CompiledPolicySnapshot, CompiledPolicySpec, CpuPolicyEvaluator, CudaNativePolicyEvaluator,
-        PolicyActivation, PolicyAggregation, PolicyBatchEvaluator, PolicyBridgeBackend,
-        PolicyBridgeError, PolicyIncomingEdge, PolicyIncomingSource, PolicyNativeError,
-        PolicyNetworkType, PolicyRuntimeBackend,
+        CompiledPolicyNodeEval, CompiledPolicyNodeMemory, CompiledPolicyRequest,
+        CompiledPolicyResult, CompiledPolicySnapshot, CompiledPolicySpec, CpuPolicyEvaluator,
+        CudaNativePolicyEvaluator, PolicyActivation, PolicyAggregation, PolicyBatchEvaluator,
+        PolicyBridgeBackend, PolicyBridgeError, PolicyIncomingEdge, PolicyIncomingSource,
+        PolicyNativeError, PolicyNetworkType, PolicyNodeGruTopology, PolicyNodeHebbianRule,
+        PolicyNodeMemoryKind, PolicyRuntimeBackend,
     };
 }
 

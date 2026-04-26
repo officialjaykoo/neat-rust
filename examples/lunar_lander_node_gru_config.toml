@@ -54,9 +54,9 @@ mutate_rate = 0.0
 replace_rate = 0.0
 
 [genome.node_memory_kind]
-default = "plain"
-mutate_rate = 0.02
-options = ["none", "node-gru", "hebbian", "linear-gate"]
+default = "node-gru"
+mutate_rate = 0.0
+options = ["node-gru"]
 
 [genome.node_gru_topology]
 default = "coupled"
@@ -229,7 +229,7 @@ mutate_rate = 0.65
 replace_rate = 0.08
 
 [species_set]
-compatibility_threshold = 3.0
+compatibility_threshold = 5.0
 target_num_species = "none"
 threshold_adjust_rate = 0.1
 threshold_min = 0.1
@@ -243,7 +243,7 @@ species_elitism = 1
 [reproduction]
 elitism = 1
 survival_threshold = 0.25
-min_species_size = 2
+min_species_size = 1
 fitness_sharing = "normalized"
 spawn_method = "smoothed"
 interspecies_crossover_prob = 0.0

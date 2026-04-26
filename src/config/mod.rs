@@ -81,6 +81,135 @@ impl fmt::Display for FitnessCriterion {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NodeMemoryKind {
+    None,
+    NodeGru,
+    Hebbian,
+    LinearGate,
+    LinearGateV2,
+}
+
+impl NodeMemoryKind {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "none" | "plain" => Some(Self::None),
+            "node-gru" | "node_gru" | "gru" => Some(Self::NodeGru),
+            "hebbian" | "fast-weight" | "fast_weight" => Some(Self::Hebbian),
+            "linear-gate" | "linear_gate" | "linear" | "gated-linear" | "gated_linear" => {
+                Some(Self::LinearGate)
+            }
+            "linear-gate-v2" | "linear_gate_v2" | "linear-v2" | "linear_v2" | "rg-lru-lite"
+            | "rg_lru_lite" => Some(Self::LinearGateV2),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::NodeGru => "node-gru",
+            Self::Hebbian => "hebbian",
+            Self::LinearGate => "linear-gate",
+            Self::LinearGateV2 => "rg-lru-lite",
+        }
+    }
+}
+
+impl fmt::Display for NodeMemoryKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
+impl ConfigChoice for NodeMemoryKind {
+    fn name(self) -> &'static str {
+        NodeMemoryKind::name(self)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NodeGruTopology {
+    Standard,
+    Minimal,
+    Coupled,
+    ResetOnly,
+}
+
+impl NodeGruTopology {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "standard" | "gru" => Some(Self::Standard),
+            "minimal" | "update-only" | "update_only" => Some(Self::Minimal),
+            "coupled" | "coupled-gate" | "coupled_gate" => Some(Self::Coupled),
+            "reset-only" | "reset_only" => Some(Self::ResetOnly),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Standard => "standard",
+            Self::Minimal => "minimal",
+            Self::Coupled => "coupled",
+            Self::ResetOnly => "reset-only",
+        }
+    }
+}
+
+impl fmt::Display for NodeGruTopology {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
+impl ConfigChoice for NodeGruTopology {
+    fn name(self) -> &'static str {
+        NodeGruTopology::name(self)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NodeHebbianRule {
+    Plain,
+    Oja,
+    Bcm,
+    OjaBcm,
+}
+
+impl NodeHebbianRule {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "plain" | "hebb" | "hebbian" => Some(Self::Plain),
+            "oja" => Some(Self::Oja),
+            "bcm" => Some(Self::Bcm),
+            "oja-bcm" | "oja_bcm" | "bcm-oja" | "bcm_oja" => Some(Self::OjaBcm),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Plain => "plain",
+            Self::Oja => "oja",
+            Self::Bcm => "bcm",
+            Self::OjaBcm => "oja-bcm",
+        }
+    }
+}
+
+impl fmt::Display for NodeHebbianRule {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
+impl ConfigChoice for NodeHebbianRule {
+    fn name(self) -> &'static str {
+        NodeHebbianRule::name(self)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InitialConnectionMode {
     Unconnected,
@@ -556,16 +685,34 @@ pub struct GenomeConfig {
     pub iz_b: FloatAttributeConfig,
     pub iz_c: FloatAttributeConfig,
     pub iz_d: FloatAttributeConfig,
-    pub memory_gate_enabled: BoolAttributeConfig,
-    pub memory_gate_bias: FloatAttributeConfig,
-    pub memory_gate_response: FloatAttributeConfig,
+    pub node_memory_kind: ChoiceAttributeConfig<NodeMemoryKind>,
+    pub node_gru_topology: ChoiceAttributeConfig<NodeGruTopology>,
+    pub node_gru_reset_bias: FloatAttributeConfig,
+    pub node_gru_reset_response: FloatAttributeConfig,
+    pub node_gru_reset_memory_weight: FloatAttributeConfig,
+    pub node_gru_update_bias: FloatAttributeConfig,
+    pub node_gru_update_response: FloatAttributeConfig,
+    pub node_gru_update_memory_weight: FloatAttributeConfig,
+    pub node_gru_candidate_memory_weight: FloatAttributeConfig,
+    pub node_hebbian_rule: ChoiceAttributeConfig<NodeHebbianRule>,
+    pub node_hebbian_decay: FloatAttributeConfig,
+    pub node_hebbian_eta: FloatAttributeConfig,
+    pub node_hebbian_key_weight: FloatAttributeConfig,
+    pub node_hebbian_alpha: FloatAttributeConfig,
+    pub node_hebbian_mod_bias: FloatAttributeConfig,
+    pub node_hebbian_mod_response: FloatAttributeConfig,
+    pub node_hebbian_theta_decay: FloatAttributeConfig,
+    pub node_linear_decay_bias: FloatAttributeConfig,
+    pub node_linear_decay_response: FloatAttributeConfig,
+    pub node_linear_write_weight: FloatAttributeConfig,
+    pub node_linear_gate_bias: FloatAttributeConfig,
+    pub node_linear_gate_response: FloatAttributeConfig,
+    pub node_linear_min_decay: FloatAttributeConfig,
+    pub node_linear_input_mix: FloatAttributeConfig,
+    pub node_linear_memory_weight: FloatAttributeConfig,
+    pub node_linear_trace_decay: FloatAttributeConfig,
+    pub node_linear_trace_weight: FloatAttributeConfig,
     pub enabled: BoolAttributeConfig,
-    pub connection_gru_enabled: BoolAttributeConfig,
-    pub connection_memory_weight: FloatAttributeConfig,
-    pub connection_reset_input_weight: FloatAttributeConfig,
-    pub connection_reset_memory_weight: FloatAttributeConfig,
-    pub connection_update_input_weight: FloatAttributeConfig,
-    pub connection_update_memory_weight: FloatAttributeConfig,
     pub compatibility_disjoint_coefficient: f64,
     pub compatibility_excess_coefficient: CompatibilityExcessCoefficient,
     pub compatibility_include_node_genes: bool,
@@ -898,40 +1045,140 @@ impl Config {
         validate_float_attribute("genome.iz_b", "iz_b", &self.genome.iz_b)?;
         validate_float_attribute("genome.iz_c", "iz_c", &self.genome.iz_c)?;
         validate_float_attribute("genome.iz_d", "iz_d", &self.genome.iz_d)?;
-        validate_float_attribute(
-            "genome.memory_gate_bias",
-            "memory_gate_bias",
-            &self.genome.memory_gate_bias,
+        validate_choice_attribute(
+            "genome.node_memory_kind",
+            "node_memory_kind",
+            &self.genome.node_memory_kind,
+        )?;
+        validate_choice_attribute(
+            "genome.node_gru_topology",
+            "node_gru_topology",
+            &self.genome.node_gru_topology,
         )?;
         validate_float_attribute(
-            "genome.memory_gate_response",
-            "memory_gate_response",
-            &self.genome.memory_gate_response,
+            "genome.node_gru_reset_bias",
+            "node_gru_reset_bias",
+            &self.genome.node_gru_reset_bias,
         )?;
         validate_float_attribute(
-            "genome.connection_memory_weight",
-            "connection_memory_weight",
-            &self.genome.connection_memory_weight,
+            "genome.node_gru_reset_response",
+            "node_gru_reset_response",
+            &self.genome.node_gru_reset_response,
         )?;
         validate_float_attribute(
-            "genome.connection_reset_input_weight",
-            "connection_reset_input_weight",
-            &self.genome.connection_reset_input_weight,
+            "genome.node_gru_reset_memory_weight",
+            "node_gru_reset_memory_weight",
+            &self.genome.node_gru_reset_memory_weight,
         )?;
         validate_float_attribute(
-            "genome.connection_reset_memory_weight",
-            "connection_reset_memory_weight",
-            &self.genome.connection_reset_memory_weight,
+            "genome.node_gru_update_bias",
+            "node_gru_update_bias",
+            &self.genome.node_gru_update_bias,
         )?;
         validate_float_attribute(
-            "genome.connection_update_input_weight",
-            "connection_update_input_weight",
-            &self.genome.connection_update_input_weight,
+            "genome.node_gru_update_response",
+            "node_gru_update_response",
+            &self.genome.node_gru_update_response,
         )?;
         validate_float_attribute(
-            "genome.connection_update_memory_weight",
-            "connection_update_memory_weight",
-            &self.genome.connection_update_memory_weight,
+            "genome.node_gru_update_memory_weight",
+            "node_gru_update_memory_weight",
+            &self.genome.node_gru_update_memory_weight,
+        )?;
+        validate_float_attribute(
+            "genome.node_gru_candidate_memory_weight",
+            "node_gru_candidate_memory_weight",
+            &self.genome.node_gru_candidate_memory_weight,
+        )?;
+        validate_choice_attribute(
+            "genome.node_hebbian_rule",
+            "node_hebbian_rule",
+            &self.genome.node_hebbian_rule,
+        )?;
+        validate_float_attribute(
+            "genome.node_hebbian_decay",
+            "node_hebbian_decay",
+            &self.genome.node_hebbian_decay,
+        )?;
+        validate_float_attribute(
+            "genome.node_hebbian_eta",
+            "node_hebbian_eta",
+            &self.genome.node_hebbian_eta,
+        )?;
+        validate_float_attribute(
+            "genome.node_hebbian_key_weight",
+            "node_hebbian_key_weight",
+            &self.genome.node_hebbian_key_weight,
+        )?;
+        validate_float_attribute(
+            "genome.node_hebbian_alpha",
+            "node_hebbian_alpha",
+            &self.genome.node_hebbian_alpha,
+        )?;
+        validate_float_attribute(
+            "genome.node_hebbian_mod_bias",
+            "node_hebbian_mod_bias",
+            &self.genome.node_hebbian_mod_bias,
+        )?;
+        validate_float_attribute(
+            "genome.node_hebbian_mod_response",
+            "node_hebbian_mod_response",
+            &self.genome.node_hebbian_mod_response,
+        )?;
+        validate_float_attribute(
+            "genome.node_hebbian_theta_decay",
+            "node_hebbian_theta_decay",
+            &self.genome.node_hebbian_theta_decay,
+        )?;
+        validate_float_attribute(
+            "genome.node_linear_decay_bias",
+            "node_linear_decay_bias",
+            &self.genome.node_linear_decay_bias,
+        )?;
+        validate_float_attribute(
+            "genome.node_linear_decay_response",
+            "node_linear_decay_response",
+            &self.genome.node_linear_decay_response,
+        )?;
+        validate_float_attribute(
+            "genome.node_linear_write_weight",
+            "node_linear_write_weight",
+            &self.genome.node_linear_write_weight,
+        )?;
+        validate_float_attribute(
+            "genome.node_linear_gate_bias",
+            "node_linear_gate_bias",
+            &self.genome.node_linear_gate_bias,
+        )?;
+        validate_float_attribute(
+            "genome.node_linear_gate_response",
+            "node_linear_gate_response",
+            &self.genome.node_linear_gate_response,
+        )?;
+        validate_float_attribute(
+            "genome.node_linear_min_decay",
+            "node_linear_min_decay",
+            &self.genome.node_linear_min_decay,
+        )?;
+        validate_float_attribute(
+            "genome.node_linear_input_mix",
+            "node_linear_input_mix",
+            &self.genome.node_linear_input_mix,
+        )?;
+        validate_float_attribute(
+            "genome.node_linear_memory_weight",
+            "node_linear_memory_weight",
+            &self.genome.node_linear_memory_weight,
+        )?;
+        validate_float_attribute(
+            "genome.node_linear_trace_decay",
+            "node_linear_trace_decay",
+            &self.genome.node_linear_trace_decay,
+        )?;
+        validate_float_attribute(
+            "genome.node_linear_trace_weight",
+            "node_linear_trace_weight",
+            &self.genome.node_linear_trace_weight,
         )?;
         validate_float_attribute("genome.weight", "weight", &self.genome.weight)?;
 

@@ -351,9 +351,6 @@ extern "C" __global__ void policy_recurrent_kernel(
     const int* activation,
     const float* bias,
     const float* response,
-    const unsigned char* memory_gate_enabled,
-    const float* memory_gate_bias,
-    const float* memory_gate_response,
     const int* output_indices,
     const int* source_kind,
     const int* source_index,
@@ -401,15 +398,7 @@ extern "C" __global__ void policy_recurrent_kernel(
     }
 
     float candidate_pre = bias[node_idx] + (response[node_idx] * aggregated);
-    float candidate_value = apply_policy_activation(activation[node_idx], candidate_pre);
-    if (memory_gate_enabled[node_idx]) {
-      float gate_pre = memory_gate_bias[node_idx] + (memory_gate_response[node_idx] * aggregated);
-      float gate = policy_sigmoid(gate_pre);
-      float previous = snapshots_in[snapshot_base + node_idx];
-      next_values[node_idx] = ((1.0f - gate) * previous) + (gate * candidate_value);
-    } else {
-      next_values[node_idx] = candidate_value;
-    }
+    next_values[node_idx] = apply_policy_activation(activation[node_idx], candidate_pre);
     snapshots_out[snapshot_base + node_idx] = next_values[node_idx];
   }
 

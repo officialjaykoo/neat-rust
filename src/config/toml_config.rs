@@ -7,9 +7,9 @@ use super::{
     AdaptiveMutationConfig, BoolAttributeConfig, ChoiceAttributeConfig, ChoiceAttributeDefault,
     CompatibilityExcessCoefficient, Config, ConfigChoice, ConfigError, FitnessCriterion,
     FitnessSharingMode, FloatAttributeConfig, FloatInitType, GenomeConfig, InitialConnection,
-    InitialConnectionMode, MutationRateCaps, NeatConfig, Probability, ReproductionConfig,
-    SpawnMethod, SpeciesFitnessFunction, SpeciesSetConfig, StagnationConfig,
-    StructuralMutationSurer, TargetNumSpecies,
+    InitialConnectionMode, MutationRateCaps, NeatConfig, NodeGruTopology, NodeHebbianRule,
+    NodeMemoryKind, Probability, ReproductionConfig, SpawnMethod, SpeciesFitnessFunction,
+    SpeciesSetConfig, StagnationConfig, StructuralMutationSurer, TargetNumSpecies,
 };
 
 #[derive(Debug, Clone, Deserialize)]
@@ -97,16 +97,34 @@ struct RawGenomeConfig {
     b: Option<RawFloatAttribute>,
     c: Option<RawFloatAttribute>,
     d: Option<RawFloatAttribute>,
-    memory_gate_enabled: Option<RawBoolAttribute>,
-    memory_gate_bias: Option<RawFloatAttribute>,
-    memory_gate_response: Option<RawFloatAttribute>,
+    node_memory_kind: Option<RawChoiceAttribute>,
+    node_gru_topology: Option<RawChoiceAttribute>,
+    node_gru_reset_bias: Option<RawFloatAttribute>,
+    node_gru_reset_response: Option<RawFloatAttribute>,
+    node_gru_reset_memory_weight: Option<RawFloatAttribute>,
+    node_gru_update_bias: Option<RawFloatAttribute>,
+    node_gru_update_response: Option<RawFloatAttribute>,
+    node_gru_update_memory_weight: Option<RawFloatAttribute>,
+    node_gru_candidate_memory_weight: Option<RawFloatAttribute>,
+    node_hebbian_rule: Option<RawChoiceAttribute>,
+    node_hebbian_decay: Option<RawFloatAttribute>,
+    node_hebbian_eta: Option<RawFloatAttribute>,
+    node_hebbian_key_weight: Option<RawFloatAttribute>,
+    node_hebbian_alpha: Option<RawFloatAttribute>,
+    node_hebbian_mod_bias: Option<RawFloatAttribute>,
+    node_hebbian_mod_response: Option<RawFloatAttribute>,
+    node_hebbian_theta_decay: Option<RawFloatAttribute>,
+    node_linear_decay_bias: Option<RawFloatAttribute>,
+    node_linear_decay_response: Option<RawFloatAttribute>,
+    node_linear_write_weight: Option<RawFloatAttribute>,
+    node_linear_gate_bias: Option<RawFloatAttribute>,
+    node_linear_gate_response: Option<RawFloatAttribute>,
+    node_linear_min_decay: Option<RawFloatAttribute>,
+    node_linear_input_mix: Option<RawFloatAttribute>,
+    node_linear_memory_weight: Option<RawFloatAttribute>,
+    node_linear_trace_decay: Option<RawFloatAttribute>,
+    node_linear_trace_weight: Option<RawFloatAttribute>,
     enabled: RawBoolAttribute,
-    connection_gru_enabled: Option<RawBoolAttribute>,
-    connection_memory_weight: Option<RawFloatAttribute>,
-    connection_reset_input_weight: Option<RawFloatAttribute>,
-    connection_reset_memory_weight: Option<RawFloatAttribute>,
-    connection_update_input_weight: Option<RawFloatAttribute>,
-    connection_update_memory_weight: Option<RawFloatAttribute>,
     compatibility_disjoint_coefficient: f64,
     compatibility_excess_coefficient: Option<String>,
     #[serde(default = "default_true")]
@@ -198,50 +216,160 @@ impl RawGenomeConfig {
                 .map(RawFloatAttribute::into_config)
                 .transpose()?
                 .unwrap_or_else(default_iz_d_attribute),
-            memory_gate_enabled: self
-                .memory_gate_enabled
-                .map(RawBoolAttribute::into_config)
-                .unwrap_or_else(default_memory_gate_enabled_attribute),
-            memory_gate_bias: self
-                .memory_gate_bias
+            node_memory_kind: self
+                .node_memory_kind
+                .map(|value| {
+                    value.into_choice_config(
+                        "genome.node_memory_kind",
+                        NodeMemoryKind::parse,
+                        "none, node-gru, hebbian, linear-gate, or rg-lru-lite",
+                    )
+                })
+                .transpose()?
+                .unwrap_or_else(default_node_memory_kind_attribute),
+            node_gru_topology: self
+                .node_gru_topology
+                .map(|value| {
+                    value.into_choice_config(
+                        "genome.node_gru_topology",
+                        NodeGruTopology::parse,
+                        "standard, minimal, coupled, or reset-only",
+                    )
+                })
+                .transpose()?
+                .unwrap_or_else(default_node_gru_topology_attribute),
+            node_gru_reset_bias: self
+                .node_gru_reset_bias
                 .map(RawFloatAttribute::into_config)
                 .transpose()?
-                .unwrap_or_else(default_memory_gate_bias_attribute),
-            memory_gate_response: self
-                .memory_gate_response
+                .unwrap_or_else(default_node_gate_bias_attribute),
+            node_gru_reset_response: self
+                .node_gru_reset_response
                 .map(RawFloatAttribute::into_config)
                 .transpose()?
-                .unwrap_or_else(default_memory_gate_response_attribute),
+                .unwrap_or_else(default_node_gate_response_attribute),
+            node_gru_reset_memory_weight: self
+                .node_gru_reset_memory_weight
+                .map(RawFloatAttribute::into_config)
+                .transpose()?
+                .unwrap_or_else(default_node_zero_weight_attribute),
+            node_gru_update_bias: self
+                .node_gru_update_bias
+                .map(RawFloatAttribute::into_config)
+                .transpose()?
+                .unwrap_or_else(default_node_gate_bias_attribute),
+            node_gru_update_response: self
+                .node_gru_update_response
+                .map(RawFloatAttribute::into_config)
+                .transpose()?
+                .unwrap_or_else(default_node_gate_response_attribute),
+            node_gru_update_memory_weight: self
+                .node_gru_update_memory_weight
+                .map(RawFloatAttribute::into_config)
+                .transpose()?
+                .unwrap_or_else(default_node_zero_weight_attribute),
+            node_gru_candidate_memory_weight: self
+                .node_gru_candidate_memory_weight
+                .map(RawFloatAttribute::into_config)
+                .transpose()?
+                .unwrap_or_else(default_node_zero_weight_attribute),
+            node_hebbian_rule: self
+                .node_hebbian_rule
+                .map(|value| {
+                    value.into_choice_config(
+                        "genome.node_hebbian_rule",
+                        NodeHebbianRule::parse,
+                        "plain, oja, bcm, or oja-bcm",
+                    )
+                })
+                .transpose()?
+                .unwrap_or_else(default_node_hebbian_rule_attribute),
+            node_hebbian_decay: self
+                .node_hebbian_decay
+                .map(RawFloatAttribute::into_config)
+                .transpose()?
+                .unwrap_or_else(default_node_hebbian_decay_attribute),
+            node_hebbian_eta: self
+                .node_hebbian_eta
+                .map(RawFloatAttribute::into_config)
+                .transpose()?
+                .unwrap_or_else(default_node_hebbian_eta_attribute),
+            node_hebbian_key_weight: self
+                .node_hebbian_key_weight
+                .map(RawFloatAttribute::into_config)
+                .transpose()?
+                .unwrap_or_else(default_node_weight_attribute),
+            node_hebbian_alpha: self
+                .node_hebbian_alpha
+                .map(RawFloatAttribute::into_config)
+                .transpose()?
+                .unwrap_or_else(default_node_hebbian_alpha_attribute),
+            node_hebbian_mod_bias: self
+                .node_hebbian_mod_bias
+                .map(RawFloatAttribute::into_config)
+                .transpose()?
+                .unwrap_or_else(default_node_gate_bias_attribute),
+            node_hebbian_mod_response: self
+                .node_hebbian_mod_response
+                .map(RawFloatAttribute::into_config)
+                .transpose()?
+                .unwrap_or_else(default_node_gate_response_attribute),
+            node_hebbian_theta_decay: self
+                .node_hebbian_theta_decay
+                .map(RawFloatAttribute::into_config)
+                .transpose()?
+                .unwrap_or_else(default_node_hebbian_theta_decay_attribute),
+            node_linear_decay_bias: self
+                .node_linear_decay_bias
+                .map(RawFloatAttribute::into_config)
+                .transpose()?
+                .unwrap_or_else(default_node_gate_bias_attribute),
+            node_linear_decay_response: self
+                .node_linear_decay_response
+                .map(RawFloatAttribute::into_config)
+                .transpose()?
+                .unwrap_or_else(default_node_gate_response_attribute),
+            node_linear_write_weight: self
+                .node_linear_write_weight
+                .map(RawFloatAttribute::into_config)
+                .transpose()?
+                .unwrap_or_else(default_node_weight_attribute),
+            node_linear_gate_bias: self
+                .node_linear_gate_bias
+                .map(RawFloatAttribute::into_config)
+                .transpose()?
+                .unwrap_or_else(default_node_gate_bias_attribute),
+            node_linear_gate_response: self
+                .node_linear_gate_response
+                .map(RawFloatAttribute::into_config)
+                .transpose()?
+                .unwrap_or_else(default_node_gate_response_attribute),
+            node_linear_min_decay: self
+                .node_linear_min_decay
+                .map(RawFloatAttribute::into_config)
+                .transpose()?
+                .unwrap_or_else(default_node_linear_min_decay_attribute),
+            node_linear_input_mix: self
+                .node_linear_input_mix
+                .map(RawFloatAttribute::into_config)
+                .transpose()?
+                .unwrap_or_else(default_node_zero_weight_attribute),
+            node_linear_memory_weight: self
+                .node_linear_memory_weight
+                .map(RawFloatAttribute::into_config)
+                .transpose()?
+                .unwrap_or_else(default_node_linear_memory_weight_attribute),
+            node_linear_trace_decay: self
+                .node_linear_trace_decay
+                .map(RawFloatAttribute::into_config)
+                .transpose()?
+                .unwrap_or_else(default_node_linear_trace_decay_attribute),
+            node_linear_trace_weight: self
+                .node_linear_trace_weight
+                .map(RawFloatAttribute::into_config)
+                .transpose()?
+                .unwrap_or_else(default_node_zero_weight_attribute),
             enabled: self.enabled.into_config(),
-            connection_gru_enabled: self
-                .connection_gru_enabled
-                .map(RawBoolAttribute::into_config)
-                .unwrap_or_else(default_connection_gru_enabled_attribute),
-            connection_memory_weight: self
-                .connection_memory_weight
-                .map(RawFloatAttribute::into_config)
-                .transpose()?
-                .unwrap_or_else(default_connection_gru_weight_attribute),
-            connection_reset_input_weight: self
-                .connection_reset_input_weight
-                .map(RawFloatAttribute::into_config)
-                .transpose()?
-                .unwrap_or_else(default_connection_gru_weight_attribute),
-            connection_reset_memory_weight: self
-                .connection_reset_memory_weight
-                .map(RawFloatAttribute::into_config)
-                .transpose()?
-                .unwrap_or_else(default_connection_gru_weight_attribute),
-            connection_update_input_weight: self
-                .connection_update_input_weight
-                .map(RawFloatAttribute::into_config)
-                .transpose()?
-                .unwrap_or_else(default_connection_gru_weight_attribute),
-            connection_update_memory_weight: self
-                .connection_update_memory_weight
-                .map(RawFloatAttribute::into_config)
-                .transpose()?
-                .unwrap_or_else(default_connection_gru_weight_attribute),
             compatibility_disjoint_coefficient: self.compatibility_disjoint_coefficient,
             compatibility_excess_coefficient: self
                 .compatibility_excess_coefficient
@@ -691,32 +819,70 @@ fn default_iz_d_attribute() -> FloatAttributeConfig {
     default_float_attribute(8.0, 8.0, 8.0)
 }
 
-fn default_memory_gate_enabled_attribute() -> BoolAttributeConfig {
-    BoolAttributeConfig {
-        default: false,
+fn default_node_memory_kind_attribute() -> ChoiceAttributeConfig<NodeMemoryKind> {
+    ChoiceAttributeConfig {
+        default: ChoiceAttributeDefault::Value(NodeMemoryKind::None),
         mutate_rate: Probability::zero(),
-        rate_to_true_add: Probability::zero(),
-        rate_to_false_add: Probability::zero(),
+        options: vec![NodeMemoryKind::None],
     }
 }
 
-fn default_memory_gate_bias_attribute() -> FloatAttributeConfig {
-    default_float_attribute(0.0, 0.0, 0.0)
-}
-
-fn default_memory_gate_response_attribute() -> FloatAttributeConfig {
-    default_float_attribute(1.0, 1.0, 1.0)
-}
-
-fn default_connection_gru_enabled_attribute() -> BoolAttributeConfig {
-    BoolAttributeConfig {
-        default: false,
+fn default_node_gru_topology_attribute() -> ChoiceAttributeConfig<NodeGruTopology> {
+    ChoiceAttributeConfig {
+        default: ChoiceAttributeDefault::Value(NodeGruTopology::Standard),
         mutate_rate: Probability::zero(),
-        rate_to_true_add: Probability::zero(),
-        rate_to_false_add: Probability::zero(),
+        options: vec![NodeGruTopology::Standard],
     }
 }
 
-fn default_connection_gru_weight_attribute() -> FloatAttributeConfig {
-    default_float_attribute(0.0, 0.0, 0.0)
+fn default_node_hebbian_rule_attribute() -> ChoiceAttributeConfig<NodeHebbianRule> {
+    ChoiceAttributeConfig {
+        default: ChoiceAttributeDefault::Value(NodeHebbianRule::Oja),
+        mutate_rate: Probability::zero(),
+        options: vec![NodeHebbianRule::Oja],
+    }
+}
+
+fn default_node_hebbian_decay_attribute() -> FloatAttributeConfig {
+    default_float_attribute(0.9, 0.0, 1.0)
+}
+
+fn default_node_hebbian_eta_attribute() -> FloatAttributeConfig {
+    default_float_attribute(0.05, -1.0, 1.0)
+}
+
+fn default_node_hebbian_alpha_attribute() -> FloatAttributeConfig {
+    default_float_attribute(0.5, -5.0, 5.0)
+}
+
+fn default_node_hebbian_theta_decay_attribute() -> FloatAttributeConfig {
+    default_float_attribute(0.95, 0.0, 0.999)
+}
+
+fn default_node_weight_attribute() -> FloatAttributeConfig {
+    default_float_attribute(1.0, -5.0, 5.0)
+}
+
+fn default_node_zero_weight_attribute() -> FloatAttributeConfig {
+    default_float_attribute(0.0, -5.0, 5.0)
+}
+
+fn default_node_gate_bias_attribute() -> FloatAttributeConfig {
+    default_float_attribute(0.0, -5.0, 5.0)
+}
+
+fn default_node_gate_response_attribute() -> FloatAttributeConfig {
+    default_float_attribute(1.0, -5.0, 5.0)
+}
+
+fn default_node_linear_min_decay_attribute() -> FloatAttributeConfig {
+    default_float_attribute(0.5, 0.0, 0.99)
+}
+
+fn default_node_linear_memory_weight_attribute() -> FloatAttributeConfig {
+    default_float_attribute(1.0, 0.0, 1.5)
+}
+
+fn default_node_linear_trace_decay_attribute() -> FloatAttributeConfig {
+    default_float_attribute(0.8, 0.0, 0.99)
 }

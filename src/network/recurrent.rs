@@ -4,10 +4,14 @@ use std::fmt;
 
 use crate::activation::{ActivationError, ActivationFunction};
 use crate::aggregation::{AggregationError, AggregationFunction};
-use crate::config::GenomeConfig;
-use crate::gene::NodeKey;
+use crate::config::{GenomeConfig, NodeMemoryKind};
+use crate::gene::{DefaultNodeGene, NodeKey};
 use crate::genome::{input_keys, output_keys, DefaultGenome};
 use crate::graph::required_for_output;
+use crate::network_impl::recurrent_memory::{
+    eval_node_memory, NodeGruMemory, NodeHebbianMemory, NodeLinearGateMemory,
+    NodeLinearGateV2Memory, RecurrentMemoryState, RecurrentNodeMemory,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RecurrentNodeEval {
@@ -17,27 +21,13 @@ pub struct RecurrentNodeEval {
     pub bias: f64,
     pub response: f64,
     pub links: Vec<RecurrentConnectionEval>,
-    pub memory_gate_enabled: bool,
-    pub memory_gate_bias: f64,
-    pub memory_gate_response: f64,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub struct RecurrentConnectionState {
-    pub memory: f64,
-    pub previous_input: f64,
+    pub memory: RecurrentNodeMemory,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RecurrentConnectionEval {
     pub input: NodeKey,
     pub weight: f64,
-    pub connection_gru_enabled: bool,
-    pub connection_memory_weight: f64,
-    pub connection_reset_input_weight: f64,
-    pub connection_reset_memory_weight: f64,
-    pub connection_update_input_weight: f64,
-    pub connection_update_memory_weight: f64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -45,9 +35,36 @@ pub struct RecurrentNetwork {
     pub input_nodes: Vec<NodeKey>,
     pub output_nodes: Vec<NodeKey>,
     pub node_evals: Vec<RecurrentNodeEval>,
-    values: [BTreeMap<NodeKey, f64>; 2],
-    connection_states: BTreeMap<(NodeKey, usize), RecurrentConnectionState>,
+    dense_node_evals: Vec<DenseRecurrentNodeEval>,
+    output_sources: Vec<RecurrentValueSource>,
+    input_values: Vec<f64>,
+    values: [Vec<f64>; 2],
+    memory_states: Vec<RecurrentMemoryState>,
     active: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct DenseRecurrentNodeEval {
+    node: NodeKey,
+    activation: ActivationFunction,
+    aggregation: AggregationFunction,
+    bias: f64,
+    response: f64,
+    links: Vec<DenseRecurrentConnectionEval>,
+    memory: RecurrentNodeMemory,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct DenseRecurrentConnectionEval {
+    source: RecurrentValueSource,
+    weight: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RecurrentValueSource {
+    Input(usize),
+    Node(usize),
+    Zero,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,36 +81,62 @@ impl RecurrentNetwork {
         output_nodes: Vec<NodeKey>,
         node_evals: Vec<RecurrentNodeEval>,
     ) -> Self {
-        let mut values = [BTreeMap::new(), BTreeMap::new()];
-        for value_map in &mut values {
-            for key in input_nodes.iter().chain(output_nodes.iter()) {
-                value_map.insert(*key, 0.0);
-            }
-            for node_eval in &node_evals {
-                value_map.insert(node_eval.node, 0.0);
-                for link in &node_eval.links {
-                    value_map.insert(link.input, 0.0);
-                }
-            }
-        }
+        let input_index = input_nodes
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(index, key)| (key, index))
+            .collect::<BTreeMap<_, _>>();
+        let node_index = node_evals
+            .iter()
+            .enumerate()
+            .map(|(index, node_eval)| (node_eval.node, index))
+            .collect::<BTreeMap<_, _>>();
+        let dense_node_evals = node_evals
+            .iter()
+            .map(|node_eval| DenseRecurrentNodeEval {
+                node: node_eval.node,
+                activation: node_eval.activation,
+                aggregation: node_eval.aggregation,
+                bias: node_eval.bias,
+                response: node_eval.response,
+                links: node_eval
+                    .links
+                    .iter()
+                    .map(|link| DenseRecurrentConnectionEval {
+                        source: resolve_source(link.input, &input_index, &node_index),
+                        weight: link.weight,
+                    })
+                    .collect(),
+                memory: node_eval.memory,
+            })
+            .collect::<Vec<_>>();
+        let output_sources = output_nodes
+            .iter()
+            .copied()
+            .map(|key| resolve_source(key, &input_index, &node_index))
+            .collect();
+        let node_count = dense_node_evals.len();
 
         Self {
             input_nodes,
             output_nodes,
             node_evals,
-            values,
-            connection_states: BTreeMap::new(),
+            dense_node_evals,
+            output_sources,
+            input_values: vec![0.0; input_index.len()],
+            values: [vec![0.0; node_count], vec![0.0; node_count]],
+            memory_states: vec![RecurrentMemoryState::default(); node_count],
             active: 0,
         }
     }
 
     pub fn reset(&mut self) {
+        self.input_values.fill(0.0);
         for value_map in &mut self.values {
-            for value in value_map.values_mut() {
-                *value = 0.0;
-            }
+            value_map.fill(0.0);
         }
-        self.connection_states.clear();
+        self.memory_states.fill(RecurrentMemoryState::default());
         self.active = 0;
     }
 
@@ -108,83 +151,41 @@ impl RecurrentNetwork {
         let input_index = self.active;
         let output_index = 1 - self.active;
         self.active = output_index;
+        self.input_values.copy_from_slice(inputs);
 
-        for (key, value) in self.input_nodes.iter().zip(inputs.iter()) {
-            self.values[input_index].insert(*key, *value);
-            self.values[output_index].insert(*key, *value);
-        }
-
-        for node_eval in &self.node_evals {
-            let mut node_inputs = Vec::with_capacity(node_eval.links.len());
-            for (edge_index, link) in node_eval.links.iter().enumerate() {
-                let value = self.values[input_index]
-                    .get(&link.input)
-                    .copied()
-                    .unwrap_or(0.0);
-                let contribution = if link.connection_gru_enabled {
-                    let state_key = (node_eval.node, edge_index);
-                    let previous = self
-                        .connection_states
-                        .get(&state_key)
-                        .copied()
-                        .unwrap_or_default();
-                    let reset_gate = sigmoid_gate(
-                        (value * link.connection_reset_input_weight)
-                            + (previous.memory * link.connection_reset_memory_weight),
-                    );
-                    let candidate_memory = ((previous.previous_input * link.weight)
-                        + (reset_gate * previous.memory * link.connection_memory_weight))
-                        .tanh();
-                    let update_gate = sigmoid_gate(
-                        (value * link.connection_update_input_weight)
-                            + (previous.memory * link.connection_update_memory_weight),
-                    );
-                    let next_memory =
-                        (update_gate * previous.memory) + ((1.0 - update_gate) * candidate_memory);
-                    self.connection_states.insert(
-                        state_key,
-                        RecurrentConnectionState {
-                            memory: next_memory,
-                            previous_input: value,
-                        },
-                    );
-                    (value * link.weight) + (next_memory * link.connection_memory_weight)
-                } else {
-                    value * link.weight
-                };
-                node_inputs.push(contribution);
-            }
-
-            let aggregated = node_eval.aggregation.apply(&node_inputs);
-            let candidate = node_eval
-                .activation
-                .apply(node_eval.bias + node_eval.response * aggregated);
-            let next_value = if node_eval.memory_gate_enabled {
-                let gate = sigmoid_gate(
-                    node_eval.memory_gate_bias + node_eval.memory_gate_response * aggregated,
-                );
-                let previous = self.values[input_index]
-                    .get(&node_eval.node)
-                    .copied()
-                    .unwrap_or(0.0);
-                (1.0 - gate) * previous + gate * candidate
-            } else {
-                candidate
-            };
-            self.values[output_index].insert(node_eval.node, next_value);
+        for node_index in 0..self.dense_node_evals.len() {
+            let node_eval = &self.dense_node_evals[node_index];
+            let aggregated = node_eval.aggregation.apply_iter(
+                node_eval
+                    .links
+                    .iter()
+                    .map(|link| self.source_value(link.source, input_index) * link.weight),
+            );
+            let previous = self.values[input_index][node_index];
+            let candidate_pre = node_eval.bias + node_eval.response * aggregated;
+            let update = eval_node_memory(
+                node_eval.memory,
+                |value| node_eval.activation.apply(value),
+                candidate_pre,
+                aggregated,
+                previous,
+                self.memory_states[node_index],
+            );
+            self.memory_states[node_index] = update.state;
+            self.values[output_index][node_index] = update.output;
         }
 
         Ok(self
-            .output_nodes
+            .output_sources
             .iter()
-            .map(|key| self.values[output_index].get(key).copied().unwrap_or(0.0))
+            .map(|source| self.source_value(*source, output_index))
             .collect())
     }
 
     pub fn create(genome: &DefaultGenome, config: &GenomeConfig) -> Result<Self, RecurrentError> {
         let config_input_keys = input_keys(config);
         let config_output_keys = output_keys(config);
-        let all_connections: Vec<_> = genome.connections.keys().copied().collect();
+        let all_connections = genome.connections.keys().copied().collect::<Vec<_>>();
         let required =
             required_for_output(&config_input_keys, &config_output_keys, &all_connections);
         let mut node_inputs: BTreeMap<NodeKey, Vec<RecurrentConnectionEval>> = BTreeMap::new();
@@ -206,13 +207,6 @@ impl RecurrentNetwork {
                 .push(RecurrentConnectionEval {
                     input: input_node,
                     weight: connection_gene.weight,
-                    connection_gru_enabled: connection_gene.connection_gru_enabled,
-                    connection_memory_weight: connection_gene.connection_memory_weight,
-                    connection_reset_input_weight: connection_gene.connection_reset_input_weight,
-                    connection_reset_memory_weight: connection_gene.connection_reset_memory_weight,
-                    connection_update_input_weight: connection_gene.connection_update_input_weight,
-                    connection_update_memory_weight: connection_gene
-                        .connection_update_memory_weight,
                 });
         }
 
@@ -222,20 +216,36 @@ impl RecurrentNetwork {
                 .nodes
                 .get(&node_key)
                 .ok_or(RecurrentError::MissingNodeGene(node_key))?;
-            node_evals.push(RecurrentNodeEval {
-                node: node_key,
-                activation: node_gene.activation,
-                aggregation: node_gene.aggregation,
-                bias: node_gene.bias,
-                response: node_gene.response,
-                links,
-                memory_gate_enabled: node_gene.memory_gate_enabled,
-                memory_gate_bias: node_gene.memory_gate_bias,
-                memory_gate_response: node_gene.memory_gate_response,
-            });
+            node_evals.push(RecurrentNodeEval::from_gene(node_key, node_gene, links));
         }
 
         Ok(Self::new(config_input_keys, config_output_keys, node_evals))
+    }
+
+    fn source_value(&self, source: RecurrentValueSource, value_index: usize) -> f64 {
+        match source {
+            RecurrentValueSource::Input(index) => self.input_values[index],
+            RecurrentValueSource::Node(index) => self.values[value_index][index],
+            RecurrentValueSource::Zero => 0.0,
+        }
+    }
+}
+
+impl RecurrentNodeEval {
+    pub fn from_gene(
+        node: NodeKey,
+        gene: &DefaultNodeGene,
+        links: Vec<RecurrentConnectionEval>,
+    ) -> Self {
+        Self {
+            node,
+            activation: gene.activation,
+            aggregation: gene.aggregation,
+            bias: gene.bias,
+            response: gene.response,
+            links,
+            memory: memory_from_gene(gene),
+        }
     }
 }
 
@@ -254,6 +264,61 @@ impl fmt::Display for RecurrentError {
 
 impl Error for RecurrentError {}
 
-fn sigmoid_gate(value: f64) -> f64 {
-    1.0 / (1.0 + (-value).exp())
+fn resolve_source(
+    key: NodeKey,
+    input_index: &BTreeMap<NodeKey, usize>,
+    node_index: &BTreeMap<NodeKey, usize>,
+) -> RecurrentValueSource {
+    if let Some(index) = input_index.get(&key).copied() {
+        RecurrentValueSource::Input(index)
+    } else if let Some(index) = node_index.get(&key).copied() {
+        RecurrentValueSource::Node(index)
+    } else {
+        RecurrentValueSource::Zero
+    }
+}
+
+fn memory_from_gene(gene: &DefaultNodeGene) -> RecurrentNodeMemory {
+    match gene.node_memory_kind {
+        NodeMemoryKind::None => RecurrentNodeMemory::None,
+        NodeMemoryKind::NodeGru => RecurrentNodeMemory::NodeGru(NodeGruMemory {
+            topology: gene.node_gru_topology,
+            reset_bias: gene.node_gru_reset_bias,
+            reset_response: gene.node_gru_reset_response,
+            reset_memory_weight: gene.node_gru_reset_memory_weight,
+            update_bias: gene.node_gru_update_bias,
+            update_response: gene.node_gru_update_response,
+            update_memory_weight: gene.node_gru_update_memory_weight,
+            candidate_memory_weight: gene.node_gru_candidate_memory_weight,
+        }),
+        NodeMemoryKind::Hebbian => RecurrentNodeMemory::Hebbian(NodeHebbianMemory {
+            rule: gene.node_hebbian_rule,
+            decay: gene.node_hebbian_decay,
+            eta: gene.node_hebbian_eta,
+            key_weight: gene.node_hebbian_key_weight,
+            alpha: gene.node_hebbian_alpha,
+            mod_bias: gene.node_hebbian_mod_bias,
+            mod_response: gene.node_hebbian_mod_response,
+            theta_decay: gene.node_hebbian_theta_decay,
+        }),
+        NodeMemoryKind::LinearGate => RecurrentNodeMemory::LinearGate(NodeLinearGateMemory {
+            decay_bias: gene.node_linear_decay_bias,
+            decay_response: gene.node_linear_decay_response,
+            write_weight: gene.node_linear_write_weight,
+            gate_bias: gene.node_linear_gate_bias,
+            gate_response: gene.node_linear_gate_response,
+        }),
+        NodeMemoryKind::LinearGateV2 => RecurrentNodeMemory::LinearGateV2(NodeLinearGateV2Memory {
+            decay_bias: gene.node_linear_decay_bias,
+            decay_response: gene.node_linear_decay_response,
+            write_weight: gene.node_linear_write_weight,
+            gate_bias: gene.node_linear_gate_bias,
+            gate_response: gene.node_linear_gate_response,
+            min_decay: gene.node_linear_min_decay,
+            input_mix: gene.node_linear_input_mix,
+            memory_weight: gene.node_linear_memory_weight,
+            trace_decay: gene.node_linear_trace_decay,
+            trace_weight: gene.node_linear_trace_weight,
+        }),
+    }
 }

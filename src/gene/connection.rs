@@ -10,12 +10,6 @@ pub struct DefaultConnectionGene {
     pub key: ConnectionKey,
     pub innovation: Option<i64>,
     pub weight: f64,
-    pub connection_gru_enabled: bool,
-    pub connection_memory_weight: f64,
-    pub connection_reset_input_weight: f64,
-    pub connection_reset_memory_weight: f64,
-    pub connection_update_input_weight: f64,
-    pub connection_update_memory_weight: f64,
     pub enabled: bool,
 }
 
@@ -25,12 +19,6 @@ impl DefaultConnectionGene {
             key,
             innovation: None,
             weight: 0.0,
-            connection_gru_enabled: false,
-            connection_memory_weight: 0.0,
-            connection_reset_input_weight: 0.0,
-            connection_reset_memory_weight: 0.0,
-            connection_update_input_weight: 0.0,
-            connection_update_memory_weight: 0.0,
             enabled: false,
         }
     }
@@ -68,18 +56,6 @@ impl DefaultConnectionGene {
         rng: &mut impl RandomSource,
     ) -> Result<(), GeneError> {
         self.weight = FloatAttribute::init_value(&config.weight, rng)?;
-        self.connection_gru_enabled =
-            BoolAttribute::init_value(&config.connection_gru_enabled, rng);
-        self.connection_memory_weight =
-            FloatAttribute::init_value(&config.connection_memory_weight, rng)?;
-        self.connection_reset_input_weight =
-            FloatAttribute::init_value(&config.connection_reset_input_weight, rng)?;
-        self.connection_reset_memory_weight =
-            FloatAttribute::init_value(&config.connection_reset_memory_weight, rng)?;
-        self.connection_update_input_weight =
-            FloatAttribute::init_value(&config.connection_update_input_weight, rng)?;
-        self.connection_update_memory_weight =
-            FloatAttribute::init_value(&config.connection_update_memory_weight, rng)?;
         self.enabled = BoolAttribute::init_value(&config.enabled, rng);
         Ok(())
     }
@@ -90,36 +66,6 @@ impl DefaultConnectionGene {
         rng: &mut impl RandomSource,
     ) -> Result<(), GeneError> {
         self.weight = FloatAttribute::mutate_value(self.weight, &config.weight, rng)?;
-        self.connection_gru_enabled = BoolAttribute::mutate_value(
-            self.connection_gru_enabled,
-            &config.connection_gru_enabled,
-            rng,
-        );
-        self.connection_memory_weight = FloatAttribute::mutate_value(
-            self.connection_memory_weight,
-            &config.connection_memory_weight,
-            rng,
-        )?;
-        self.connection_reset_input_weight = FloatAttribute::mutate_value(
-            self.connection_reset_input_weight,
-            &config.connection_reset_input_weight,
-            rng,
-        )?;
-        self.connection_reset_memory_weight = FloatAttribute::mutate_value(
-            self.connection_reset_memory_weight,
-            &config.connection_reset_memory_weight,
-            rng,
-        )?;
-        self.connection_update_input_weight = FloatAttribute::mutate_value(
-            self.connection_update_input_weight,
-            &config.connection_update_input_weight,
-            rng,
-        )?;
-        self.connection_update_memory_weight = FloatAttribute::mutate_value(
-            self.connection_update_memory_weight,
-            &config.connection_update_memory_weight,
-            rng,
-        )?;
         self.enabled = BoolAttribute::mutate_value(self.enabled, &config.enabled, rng);
         Ok(())
     }
@@ -137,37 +83,6 @@ impl DefaultConnectionGene {
             }
         }
 
-        let weight = choose_copy(self.weight, other.weight, rng);
-        let connection_gru_enabled = choose_copy(
-            self.connection_gru_enabled,
-            other.connection_gru_enabled,
-            rng,
-        );
-        let connection_memory_weight = choose_copy(
-            self.connection_memory_weight,
-            other.connection_memory_weight,
-            rng,
-        );
-        let connection_reset_input_weight = choose_copy(
-            self.connection_reset_input_weight,
-            other.connection_reset_input_weight,
-            rng,
-        );
-        let connection_reset_memory_weight = choose_copy(
-            self.connection_reset_memory_weight,
-            other.connection_reset_memory_weight,
-            rng,
-        );
-        let connection_update_input_weight = choose_copy(
-            self.connection_update_input_weight,
-            other.connection_update_input_weight,
-            rng,
-        );
-        let connection_update_memory_weight = choose_copy(
-            self.connection_update_memory_weight,
-            other.connection_update_memory_weight,
-            rng,
-        );
         let mut enabled = choose_copy(self.enabled, other.enabled, rng);
         if !self.enabled || !other.enabled {
             enabled = rng.next_f64() >= 0.75;
@@ -176,13 +91,7 @@ impl DefaultConnectionGene {
         Ok(Self {
             key: self.key,
             innovation: self.innovation.or(other.innovation),
-            weight,
-            connection_gru_enabled,
-            connection_memory_weight,
-            connection_reset_input_weight,
-            connection_reset_memory_weight,
-            connection_update_input_weight,
-            connection_update_memory_weight,
+            weight: choose_copy(self.weight, other.weight, rng),
             enabled,
         })
     }
@@ -196,18 +105,6 @@ impl DefaultConnectionGene {
         }
 
         let mut distance = (self.weight - other.weight).abs();
-        if self.connection_gru_enabled != other.connection_gru_enabled {
-            distance += config.compatibility_enable_penalty;
-        }
-        distance += (self.connection_memory_weight - other.connection_memory_weight).abs();
-        distance +=
-            (self.connection_reset_input_weight - other.connection_reset_input_weight).abs();
-        distance +=
-            (self.connection_reset_memory_weight - other.connection_reset_memory_weight).abs();
-        distance +=
-            (self.connection_update_input_weight - other.connection_update_input_weight).abs();
-        distance +=
-            (self.connection_update_memory_weight - other.connection_update_memory_weight).abs();
         if self.enabled != other.enabled {
             distance += config.compatibility_enable_penalty;
         }

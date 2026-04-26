@@ -57,6 +57,33 @@ impl AggregationFunction {
             Self::Mean => mean_aggregation(values),
         }
     }
+
+    pub fn apply_iter(self, values: impl IntoIterator<Item = f64>) -> f64 {
+        match self {
+            Self::Product => values.into_iter().product(),
+            Self::Sum => values.into_iter().sum(),
+            Self::Max => values.into_iter().reduce(f64::max).unwrap_or(0.0),
+            Self::Min => values.into_iter().reduce(f64::min).unwrap_or(0.0),
+            Self::MaxAbs => maxabs_aggregation_iter(values),
+            Self::Median => {
+                let mut sorted = values.into_iter().collect::<Vec<_>>();
+                median_aggregation_sorted(&mut sorted)
+            }
+            Self::Mean => {
+                let mut sum = 0.0;
+                let mut count = 0usize;
+                for value in values {
+                    sum += value;
+                    count += 1;
+                }
+                if count == 0 {
+                    0.0
+                } else {
+                    sum / count as f64
+                }
+            }
+        }
+    }
 }
 
 impl fmt::Display for AggregationFunction {
@@ -112,12 +139,17 @@ pub fn min_aggregation(values: &[f64]) -> f64 {
 }
 
 pub fn maxabs_aggregation(values: &[f64]) -> f64 {
-    let Some(first) = values.first().copied() else {
+    maxabs_aggregation_iter(values.iter().copied())
+}
+
+fn maxabs_aggregation_iter(values: impl IntoIterator<Item = f64>) -> f64 {
+    let mut values = values.into_iter();
+    let Some(first) = values.next() else {
         return 0.0;
     };
 
     let mut best = first;
-    for value in values.iter().copied().skip(1) {
+    for value in values {
         if value.abs() > best.abs() {
             best = value;
         }
@@ -131,6 +163,13 @@ pub fn median_aggregation(values: &[f64]) -> f64 {
     }
 
     let mut sorted = values.to_vec();
+    median_aggregation_sorted(&mut sorted)
+}
+
+fn median_aggregation_sorted(sorted: &mut [f64]) -> f64 {
+    if sorted.is_empty() {
+        return 0.0;
+    }
     sorted.sort_by(|a, b| a.total_cmp(b));
     let mid = sorted.len() / 2;
     if sorted.len().is_multiple_of(2) {

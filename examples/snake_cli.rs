@@ -55,16 +55,25 @@ struct SnakeEvaluator;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SnakeConfigProfile {
     Plain,
-    ConnectionGru,
+    NodeGru,
+    Hebbian,
+    LinearGate,
+    RgLruLite,
 }
 
 impl SnakeConfigProfile {
     fn parse(value: Option<&str>) -> Result<Self, String> {
         match value.unwrap_or("plain").to_ascii_lowercase().as_str() {
             "plain" | "base" | "no-gru" | "no_gru" => Ok(Self::Plain),
-            "gru" | "connection-gru" | "connection_gru" => Ok(Self::ConnectionGru),
+            "gru" | "node-gru" | "node_gru" | "nodegru" => Ok(Self::NodeGru),
+            "hebbian" | "node-hebbian" | "node_hebbian" => Ok(Self::Hebbian),
+            "linear" | "linear-gate" | "linear_gate" | "node-linear-gate"
+            | "node_linear_gate" => Ok(Self::LinearGate),
+            "rg-lru-lite" | "rg_lru_lite" | "linear-gate-v2" | "linear_gate_v2" => {
+                Ok(Self::RgLruLite)
+            }
             other => Err(format!(
-                "unknown snake config profile {other:?}; use plain or connection-gru"
+                "unknown snake config profile {other:?}; use plain, node-gru, hebbian, linear-gate, or rg-lru-lite"
             )),
         }
     }
@@ -72,14 +81,20 @@ impl SnakeConfigProfile {
     fn name(self) -> &'static str {
         match self {
             Self::Plain => "plain",
-            Self::ConnectionGru => "connection-gru",
+            Self::NodeGru => "node-gru",
+            Self::Hebbian => "hebbian",
+            Self::LinearGate => "linear-gate",
+            Self::RgLruLite => "rg-lru-lite",
         }
     }
 
     fn config_text(self) -> &'static str {
         match self {
             Self::Plain => include_str!("snake_cli_plain_config.toml"),
-            Self::ConnectionGru => include_str!("snake_cli_config.toml"),
+            Self::NodeGru => include_str!("snake_cli_node_gru_config.toml"),
+            Self::Hebbian => include_str!("snake_cli_hebbian_config.toml"),
+            Self::LinearGate => include_str!("snake_cli_linear_gate_config.toml"),
+            Self::RgLruLite => include_str!("snake_cli_rg_lru_lite_config.toml"),
         }
     }
 }
@@ -341,10 +356,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(0);
     let profile = SnakeConfigProfile::parse(args.get(2).map(String::as_str))?;
+    let base_seed = args
+        .get(3)
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(303);
     let config = Config::from_toml_str(profile.config_text())?;
     let mut evaluator = SnakeEvaluator;
     let mut best = run_population(
-        Population::new(config.clone(), 303)?,
+        Population::new(config.clone(), base_seed)?,
         &mut evaluator,
         generations,
     )?;
@@ -359,7 +378,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     for round in 1..=bootstrap_rounds {
         let strategy = BootstrapStrategy::from_champion(best.clone(), 0.5);
         let candidate = run_population(
-            Population::new_with_bootstrap(config.clone(), 303 + round as u64, strategy)?,
+            Population::new_with_bootstrap(config.clone(), base_seed + round as u64, strategy)?,
             &mut evaluator,
             generations,
         )?;

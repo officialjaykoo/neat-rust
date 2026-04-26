@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use neat_rust::io::{
-    CompatibilityExcessCoefficient, Config, FitnessSharingMode, InitialConnection, Probability,
-    SpawnMethod, TargetNumSpecies,
+    CompatibilityExcessCoefficient, Config, FitnessSharingMode, InitialConnection, NodeMemoryKind,
+    Probability, SpawnMethod, TargetNumSpecies,
 };
 use neat_rust::prelude::ActivationFunction;
 
@@ -37,9 +37,12 @@ fn parses_recurrent_memory8_config() {
         .activation
         .options
         .contains(&ActivationFunction::Identity));
-    assert!(!config.genome.memory_gate_enabled.default);
     assert_eq!(
-        config.genome.memory_gate_enabled.mutate_rate,
+        config.genome.node_memory_kind.default_label(),
+        NodeMemoryKind::None.name()
+    );
+    assert_eq!(
+        config.genome.node_memory_kind.mutate_rate,
         Probability::new(0.02)
     );
     assert_eq!(config.neat.seed, None);
@@ -88,16 +91,19 @@ fn parses_recurrent_hand7_config() {
 }
 
 #[test]
-fn parses_feedforward_memory8_config_without_memory_gate_keys() {
+fn parses_feedforward_memory8_config_without_node_memory_keys() {
     let path = repo_path("scripts/configs/neat_feedforward_memory8.toml");
     let config = Config::from_file(path).expect("memory8 feed-forward config should parse");
 
     assert_eq!(config.genome.num_inputs, 8);
     assert_eq!(config.genome.num_outputs, 2);
     assert!(config.genome.feed_forward);
-    assert!(!config.genome.memory_gate_enabled.default);
     assert_eq!(
-        config.genome.memory_gate_enabled.mutate_rate,
+        config.genome.node_memory_kind.default_label(),
+        NodeMemoryKind::None.name()
+    );
+    assert_eq!(
+        config.genome.node_memory_kind.mutate_rate,
         Probability::zero()
     );
 }

@@ -58,7 +58,10 @@ pub enum NativePolicyGpuError {
         node_id: i64,
         aggregation: String,
     },
-    ConnectionGruUnsupported {
+    RecurrentMemoryUnsupported {
+        node_id: i64,
+    },
+    NodeMemoryUnsupported {
         node_id: i64,
     },
     BufferOverflow(&'static str),
@@ -107,9 +110,13 @@ impl fmt::Display for NativePolicyGpuError {
                 f,
                 "native policy CUDA currently supports only sum aggregation; node {node_id} uses {aggregation}"
             ),
-            Self::ConnectionGruUnsupported { node_id } => write!(
+            Self::RecurrentMemoryUnsupported { node_id } => write!(
                 f,
-                "native policy CUDA does not support connection-GRU edges yet; node {node_id} uses one"
+                "native policy CUDA does not support recurrent node memory yet; node {node_id} uses one"
+            ),
+            Self::NodeMemoryUnsupported { node_id } => write!(
+                f,
+                "native policy CUDA does not support this recurrent node memory yet; node {node_id} uses one"
             ),
             Self::BufferOverflow(label) => write!(f, "{label} size overflow"),
             Self::MissingRecurrentBuffer(label) => {
@@ -255,22 +262,10 @@ mod imp {
                 .ok_or(NativePolicyGpuError::BufferOverflow("policy output buffer"))?,
         )?;
 
-        let mut d_memory_gate_enabled = None;
-        let mut d_memory_gate_bias = None;
-        let mut d_memory_gate_response = None;
         let mut d_snapshots_in = None;
         let mut d_snapshots_out = None;
 
         if spec.is_recurrent() {
-            d_memory_gate_enabled = Some(DeviceBuffer::from_slice(
-                &driver,
-                &packed.memory_gate_enabled,
-            )?);
-            d_memory_gate_bias = Some(DeviceBuffer::from_slice(&driver, &packed.memory_gate_bias)?);
-            d_memory_gate_response = Some(DeviceBuffer::from_slice(
-                &driver,
-                &packed.memory_gate_response,
-            )?);
             let snapshot_len = batch_size.checked_mul(spec.node_evals.len()).ok_or(
                 NativePolicyGpuError::BufferOverflow("policy snapshot buffer"),
             )?;
@@ -285,15 +280,6 @@ mod imp {
         let shared_bytes = policy_shared_bytes(spec.node_evals.len())?;
 
         if spec.is_recurrent() {
-            let d_memory_gate_enabled = d_memory_gate_enabled
-                .as_ref()
-                .ok_or(NativePolicyGpuError::MissingRecurrentBuffer("gate"))?;
-            let d_memory_gate_bias = d_memory_gate_bias
-                .as_ref()
-                .ok_or(NativePolicyGpuError::MissingRecurrentBuffer("gate bias"))?;
-            let d_memory_gate_response = d_memory_gate_response.as_ref().ok_or(
-                NativePolicyGpuError::MissingRecurrentBuffer("gate response"),
-            )?;
             let d_snapshots_in =
                 d_snapshots_in
                     .as_ref()
@@ -311,9 +297,6 @@ mod imp {
                 ptr_to_kernel_arg(&d_activation.ptr),
                 ptr_to_kernel_arg(&d_bias.ptr),
                 ptr_to_kernel_arg(&d_response.ptr),
-                ptr_to_kernel_arg(&d_memory_gate_enabled.ptr),
-                ptr_to_kernel_arg(&d_memory_gate_bias.ptr),
-                ptr_to_kernel_arg(&d_memory_gate_response.ptr),
                 ptr_to_kernel_arg(&d_output_indices.ptr),
                 ptr_to_kernel_arg(&d_source_kind.ptr),
                 ptr_to_kernel_arg(&d_source_index.ptr),
@@ -405,8 +388,8 @@ mod imp {
                     aggregation: node.aggregation.as_str().to_string(),
                 });
             }
-            if node.incoming.iter().any(|edge| edge.connection_gru_enabled) {
-                return Err(NativePolicyGpuError::ConnectionGruUnsupported {
+            if !matches!(node.memory.kind(), crate::config::NodeMemoryKind::None) {
+                return Err(NativePolicyGpuError::NodeMemoryUnsupported {
                     node_id: node.node_id,
                 });
             }
@@ -500,9 +483,6 @@ mod imp {
         activation_codes: Vec<i32>,
         bias: Vec<f32>,
         response: Vec<f32>,
-        memory_gate_enabled: Vec<u8>,
-        memory_gate_bias: Vec<f32>,
-        memory_gate_response: Vec<f32>,
         output_indices: Vec<i32>,
         source_kind: Vec<i32>,
         source_index: Vec<i32>,
@@ -515,9 +495,6 @@ mod imp {
             let mut activation_codes = Vec::with_capacity(spec.node_evals.len());
             let mut bias = Vec::with_capacity(spec.node_evals.len());
             let mut response = Vec::with_capacity(spec.node_evals.len());
-            let mut memory_gate_enabled = Vec::with_capacity(spec.node_evals.len());
-            let mut memory_gate_bias = Vec::with_capacity(spec.node_evals.len());
-            let mut memory_gate_response = Vec::with_capacity(spec.node_evals.len());
             let mut output_indices = Vec::with_capacity(spec.output_indices.len());
             let mut source_kind = Vec::new();
             let mut source_index = Vec::new();
@@ -532,9 +509,6 @@ mod imp {
                 activation_codes.push(node.activation.cuda_code());
                 bias.push(node.bias as f32);
                 response.push(node.response as f32);
-                memory_gate_enabled.push(u8::from(node.memory_gate_enabled));
-                memory_gate_bias.push(node.memory_gate_bias as f32);
-                memory_gate_response.push(node.memory_gate_response as f32);
                 for edge in &node.incoming {
                     let kind = match edge.source_kind {
                         PolicyIncomingSource::Input => 0,
@@ -551,9 +525,6 @@ mod imp {
                 activation_codes,
                 bias,
                 response,
-                memory_gate_enabled,
-                memory_gate_bias,
-                memory_gate_response,
                 output_indices,
                 source_kind,
                 source_index,

@@ -1,19 +1,19 @@
-﻿[neat]
+[neat]
 fitness_criterion = "max"
-fitness_threshold = 900.0
-pop_size = 64
+fitness_threshold = 1400.0
+pop_size = 80
 reset_on_extinction = true
 no_fitness_termination = true
 
 [genome]
 num_inputs = 6
-num_outputs = 2
+num_outputs = 1
 num_hidden = 0
 feed_forward = false
 initial_connection = { mode = "full_direct" }
 conn_add_prob = 0.10
 conn_delete_prob = 0.02
-node_add_prob = 0.03
+node_add_prob = 0.025
 node_delete_prob = 0.01
 single_structural_mutation = false
 structural_mutation_surer = "default"
@@ -21,12 +21,12 @@ compatibility_disjoint_coefficient = 1.0
 compatibility_excess_coefficient = "auto"
 compatibility_include_node_genes = true
 compatibility_enable_penalty = 1.0
-compatibility_weight_coefficient = 0.5
+compatibility_weight_coefficient = 0.45
 
 [genome.activation]
 default = "tanh"
 mutate_rate = 0.0
-options = ["tanh", "identity"]
+options = ["tanh", "identity", "relu"]
 
 [genome.aggregation]
 default = "sum"
@@ -35,12 +35,12 @@ options = ["sum"]
 
 [genome.bias]
 init_mean = 0.0
-init_stdev = 0.4
+init_stdev = 0.35
 init_type = "gaussian"
 max_value = 5.0
 min_value = -5.0
-mutate_power = 0.30
-mutate_rate = 0.60
+mutate_power = 0.25
+mutate_rate = 0.55
 replace_rate = 0.08
 
 [genome.response]
@@ -54,9 +54,9 @@ mutate_rate = 0.0
 replace_rate = 0.0
 
 [genome.node_memory_kind]
-default = "plain"
-mutate_rate = 0.02
-options = ["none", "node-gru", "hebbian", "linear-gate"]
+default = "linear-gate"
+mutate_rate = 0.0
+options = ["linear-gate"]
 
 [genome.node_gru_topology]
 default = "coupled"
@@ -214,22 +214,22 @@ mutate_rate = 0.25
 replace_rate = 0.05
 [genome.enabled]
 default = true
-mutate_rate = 0.01
+mutate_rate = 0.012
 rate_to_true_add = 0.0
 rate_to_false_add = 0.0
 
 [genome.weight]
 init_mean = 0.0
-init_stdev = 0.5
+init_stdev = 0.45
 init_type = "gaussian"
 max_value = 5.0
 min_value = -5.0
-mutate_power = 0.25
-mutate_rate = 0.65
+mutate_power = 0.22
+mutate_rate = 0.62
 replace_rate = 0.08
 
 [species_set]
-compatibility_threshold = 3.0
+compatibility_threshold = 5.0
 target_num_species = "none"
 threshold_adjust_rate = 0.1
 threshold_min = 0.1
@@ -243,7 +243,7 @@ species_elitism = 1
 [reproduction]
 elitism = 1
 survival_threshold = 0.25
-min_species_size = 2
+min_species_size = 1
 fitness_sharing = "normalized"
 spawn_method = "smoothed"
 interspecies_crossover_prob = 0.0
@@ -253,7 +253,7 @@ enabled = true
 start_after = 3
 full_after = 12
 max_multiplier = 3.0
-conn_add_prob_cap = 0.25
+conn_add_prob_cap = 0.28
 conn_delete_prob_cap = 0.08
-node_add_prob_cap = 0.12
+node_add_prob_cap = 0.10
 node_delete_prob_cap = 0.04

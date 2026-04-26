@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::activation::ActivationFunction;
 use crate::aggregation::AggregationFunction;
 use crate::attributes::XorShiftRng;
-use crate::config::Config;
+use crate::config::{Config, NodeGruTopology, NodeHebbianRule, NodeMemoryKind};
 use crate::gene::{ConnectionKey, DefaultConnectionGene, DefaultNodeGene};
 use crate::genome::DefaultGenome;
 use crate::ids::{GenomeId, SpeciesId};
@@ -406,9 +406,57 @@ struct NodeGeneDocument {
     iz_b: f64,
     iz_c: f64,
     iz_d: f64,
-    memory_gate_enabled: bool,
-    memory_gate_bias: f64,
-    memory_gate_response: f64,
+    memory: NodeMemoryDocument,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+enum NodeMemoryDocument {
+    #[serde(rename = "none")]
+    None,
+    #[serde(rename = "node-gru")]
+    NodeGru {
+        topology: String,
+        reset_bias: f64,
+        reset_response: f64,
+        reset_memory_weight: f64,
+        update_bias: f64,
+        update_response: f64,
+        update_memory_weight: f64,
+        candidate_memory_weight: f64,
+    },
+    #[serde(rename = "hebbian")]
+    Hebbian {
+        rule: String,
+        decay: f64,
+        eta: f64,
+        key_weight: f64,
+        alpha: f64,
+        mod_bias: f64,
+        mod_response: f64,
+        theta_decay: f64,
+    },
+    #[serde(rename = "linear-gate")]
+    LinearGate {
+        decay_bias: f64,
+        decay_response: f64,
+        write_weight: f64,
+        gate_bias: f64,
+        gate_response: f64,
+    },
+    #[serde(rename = "rg-lru-lite")]
+    RgLruLite {
+        decay_bias: f64,
+        decay_response: f64,
+        write_weight: f64,
+        gate_bias: f64,
+        gate_response: f64,
+        min_decay: f64,
+        input_mix: f64,
+        memory_weight: f64,
+        trace_decay: f64,
+        trace_weight: f64,
+    },
 }
 
 impl NodeGeneDocument {
@@ -424,14 +472,12 @@ impl NodeGeneDocument {
             iz_b: gene.iz_b,
             iz_c: gene.iz_c,
             iz_d: gene.iz_d,
-            memory_gate_enabled: gene.memory_gate_enabled,
-            memory_gate_bias: gene.memory_gate_bias,
-            memory_gate_response: gene.memory_gate_response,
+            memory: NodeMemoryDocument::from_gene(gene),
         }
     }
 
     fn into_gene(self) -> Result<DefaultNodeGene, CheckpointError> {
-        Ok(DefaultNodeGene {
+        let mut gene = DefaultNodeGene {
             key: self.id,
             bias: self.bias,
             response: self.response,
@@ -442,10 +488,144 @@ impl NodeGeneDocument {
             iz_b: self.iz_b,
             iz_c: self.iz_c,
             iz_d: self.iz_d,
-            memory_gate_enabled: self.memory_gate_enabled,
-            memory_gate_bias: self.memory_gate_bias,
-            memory_gate_response: self.memory_gate_response,
-        })
+            ..DefaultNodeGene::new(self.id)
+        };
+        self.memory.apply_to_gene(&mut gene)?;
+        Ok(gene)
+    }
+}
+
+impl NodeMemoryDocument {
+    fn from_gene(gene: &DefaultNodeGene) -> Self {
+        match gene.node_memory_kind {
+            NodeMemoryKind::None => Self::None,
+            NodeMemoryKind::NodeGru => Self::NodeGru {
+                topology: gene.node_gru_topology.name().to_string(),
+                reset_bias: gene.node_gru_reset_bias,
+                reset_response: gene.node_gru_reset_response,
+                reset_memory_weight: gene.node_gru_reset_memory_weight,
+                update_bias: gene.node_gru_update_bias,
+                update_response: gene.node_gru_update_response,
+                update_memory_weight: gene.node_gru_update_memory_weight,
+                candidate_memory_weight: gene.node_gru_candidate_memory_weight,
+            },
+            NodeMemoryKind::Hebbian => Self::Hebbian {
+                rule: gene.node_hebbian_rule.name().to_string(),
+                decay: gene.node_hebbian_decay,
+                eta: gene.node_hebbian_eta,
+                key_weight: gene.node_hebbian_key_weight,
+                alpha: gene.node_hebbian_alpha,
+                mod_bias: gene.node_hebbian_mod_bias,
+                mod_response: gene.node_hebbian_mod_response,
+                theta_decay: gene.node_hebbian_theta_decay,
+            },
+            NodeMemoryKind::LinearGate => Self::LinearGate {
+                decay_bias: gene.node_linear_decay_bias,
+                decay_response: gene.node_linear_decay_response,
+                write_weight: gene.node_linear_write_weight,
+                gate_bias: gene.node_linear_gate_bias,
+                gate_response: gene.node_linear_gate_response,
+            },
+            NodeMemoryKind::LinearGateV2 => Self::RgLruLite {
+                decay_bias: gene.node_linear_decay_bias,
+                decay_response: gene.node_linear_decay_response,
+                write_weight: gene.node_linear_write_weight,
+                gate_bias: gene.node_linear_gate_bias,
+                gate_response: gene.node_linear_gate_response,
+                min_decay: gene.node_linear_min_decay,
+                input_mix: gene.node_linear_input_mix,
+                memory_weight: gene.node_linear_memory_weight,
+                trace_decay: gene.node_linear_trace_decay,
+                trace_weight: gene.node_linear_trace_weight,
+            },
+        }
+    }
+
+    fn apply_to_gene(self, gene: &mut DefaultNodeGene) -> Result<(), CheckpointError> {
+        match self {
+            Self::None => {
+                gene.node_memory_kind = NodeMemoryKind::None;
+            }
+            Self::NodeGru {
+                topology,
+                reset_bias,
+                reset_response,
+                reset_memory_weight,
+                update_bias,
+                update_response,
+                update_memory_weight,
+                candidate_memory_weight,
+            } => {
+                gene.node_memory_kind = NodeMemoryKind::NodeGru;
+                gene.node_gru_topology = parse_node_gru_topology(&topology)?;
+                gene.node_gru_reset_bias = reset_bias;
+                gene.node_gru_reset_response = reset_response;
+                gene.node_gru_reset_memory_weight = reset_memory_weight;
+                gene.node_gru_update_bias = update_bias;
+                gene.node_gru_update_response = update_response;
+                gene.node_gru_update_memory_weight = update_memory_weight;
+                gene.node_gru_candidate_memory_weight = candidate_memory_weight;
+            }
+            Self::Hebbian {
+                rule,
+                decay,
+                eta,
+                key_weight,
+                alpha,
+                mod_bias,
+                mod_response,
+                theta_decay,
+            } => {
+                gene.node_memory_kind = NodeMemoryKind::Hebbian;
+                gene.node_hebbian_rule = parse_node_hebbian_rule(&rule)?;
+                gene.node_hebbian_decay = decay;
+                gene.node_hebbian_eta = eta;
+                gene.node_hebbian_key_weight = key_weight;
+                gene.node_hebbian_alpha = alpha;
+                gene.node_hebbian_mod_bias = mod_bias;
+                gene.node_hebbian_mod_response = mod_response;
+                gene.node_hebbian_theta_decay = theta_decay;
+            }
+            Self::LinearGate {
+                decay_bias,
+                decay_response,
+                write_weight,
+                gate_bias,
+                gate_response,
+            } => {
+                gene.node_memory_kind = NodeMemoryKind::LinearGate;
+                gene.node_linear_decay_bias = decay_bias;
+                gene.node_linear_decay_response = decay_response;
+                gene.node_linear_write_weight = write_weight;
+                gene.node_linear_gate_bias = gate_bias;
+                gene.node_linear_gate_response = gate_response;
+            }
+            Self::RgLruLite {
+                decay_bias,
+                decay_response,
+                write_weight,
+                gate_bias,
+                gate_response,
+                min_decay,
+                input_mix,
+                memory_weight,
+                trace_decay,
+                trace_weight,
+            } => {
+                gene.node_memory_kind = NodeMemoryKind::LinearGateV2;
+                gene.node_linear_decay_bias = decay_bias;
+                gene.node_linear_decay_response = decay_response;
+                gene.node_linear_write_weight = write_weight;
+                gene.node_linear_gate_bias = gate_bias;
+                gene.node_linear_gate_response = gate_response;
+                gene.node_linear_min_decay = min_decay;
+                gene.node_linear_input_mix = input_mix;
+                gene.node_linear_memory_weight = memory_weight;
+                gene.node_linear_trace_decay = trace_decay;
+                gene.node_linear_trace_weight = trace_weight;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -455,18 +635,6 @@ struct ConnectionGeneDocument {
     output: i64,
     innovation: Option<i64>,
     weight: f64,
-    #[serde(default)]
-    connection_gru_enabled: bool,
-    #[serde(default)]
-    connection_memory_weight: f64,
-    #[serde(default)]
-    connection_reset_input_weight: f64,
-    #[serde(default)]
-    connection_reset_memory_weight: f64,
-    #[serde(default)]
-    connection_update_input_weight: f64,
-    #[serde(default)]
-    connection_update_memory_weight: f64,
     enabled: bool,
 }
 
@@ -477,12 +645,6 @@ impl ConnectionGeneDocument {
             output: gene.key.output,
             innovation: gene.innovation,
             weight: gene.weight,
-            connection_gru_enabled: gene.connection_gru_enabled,
-            connection_memory_weight: gene.connection_memory_weight,
-            connection_reset_input_weight: gene.connection_reset_input_weight,
-            connection_reset_memory_weight: gene.connection_reset_memory_weight,
-            connection_update_input_weight: gene.connection_update_input_weight,
-            connection_update_memory_weight: gene.connection_update_memory_weight,
             enabled: gene.enabled,
         }
     }
@@ -492,15 +654,21 @@ impl ConnectionGeneDocument {
             key: ConnectionKey::new(self.input, self.output),
             innovation: self.innovation,
             weight: self.weight,
-            connection_gru_enabled: self.connection_gru_enabled,
-            connection_memory_weight: self.connection_memory_weight,
-            connection_reset_input_weight: self.connection_reset_input_weight,
-            connection_reset_memory_weight: self.connection_reset_memory_weight,
-            connection_update_input_weight: self.connection_update_input_weight,
-            connection_update_memory_weight: self.connection_update_memory_weight,
             enabled: self.enabled,
         }
     }
+}
+
+fn parse_node_gru_topology(value: &str) -> Result<NodeGruTopology, CheckpointError> {
+    NodeGruTopology::parse(value).ok_or_else(|| {
+        CheckpointError::Invalid(format!("node GRU topology must be known, got {value:?}"))
+    })
+}
+
+fn parse_node_hebbian_rule(value: &str) -> Result<NodeHebbianRule, CheckpointError> {
+    NodeHebbianRule::parse(value).ok_or_else(|| {
+        CheckpointError::Invalid(format!("node Hebbian rule must be known, got {value:?}"))
+    })
 }
 
 fn parse_activation(value: &str) -> Result<ActivationFunction, CheckpointError> {

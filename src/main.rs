@@ -121,7 +121,7 @@ fn print_config_summary(path: &str, config: &Config) {
         config.reproduction.survival_threshold
     );
     println!(
-        "memory_gate_enabled_default={}",
-        config.genome.memory_gate_enabled.default
+        "node_memory_kind_default={}",
+        config.genome.node_memory_kind.default_label()
     );
 }
