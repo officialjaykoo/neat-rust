@@ -69,6 +69,7 @@ fn infer_feature_profile(config: &GenomeConfig) -> String {
         7 => "hand7".to_string(),
         8 => "memory8".to_string(),
         10 => "material10".to_string(),
+        32 => "card-table-shared".to_string(),
         _ => format!("input{}", config.num_inputs),
     }
 }
