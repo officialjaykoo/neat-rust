@@ -12,6 +12,9 @@ use neat_rust::{
     network::RecurrentNetwork,
 };
 
+const INPUT_COUNT: usize = 14;
+const OUTPUT_COUNT: usize = 5;
+const LINEAR_PARAM_COUNT: usize = OUTPUT_COUNT * (INPUT_COUNT + 1);
 const DEFAULT_BASE_SEED: u64 = 505;
 const DECKS: usize = 6;
 const PENETRATION_CARDS: usize = 52;
@@ -70,6 +73,52 @@ struct ShoeReport {
 }
 
 struct BlackjackEvaluator;
+
+trait BlackjackPolicy {
+    fn reset(&mut self);
+    fn activate(&mut self, inputs: &[f64]) -> Result<Vec<f64>, FitnessError>;
+}
+
+impl BlackjackPolicy for RecurrentNetwork {
+    fn reset(&mut self) {
+        RecurrentNetwork::reset(self);
+    }
+
+    fn activate(&mut self, inputs: &[f64]) -> Result<Vec<f64>, FitnessError> {
+        RecurrentNetwork::activate(self, inputs).map_err(|err| FitnessError::new(err.to_string()))
+    }
+}
+
+#[derive(Debug, Clone)]
+struct LinearBlackjackPolicy {
+    params: Vec<f64>,
+}
+
+impl LinearBlackjackPolicy {
+    fn new(params: &[f64]) -> Self {
+        Self {
+            params: params.to_vec(),
+        }
+    }
+}
+
+impl BlackjackPolicy for LinearBlackjackPolicy {
+    fn reset(&mut self) {}
+
+    fn activate(&mut self, inputs: &[f64]) -> Result<Vec<f64>, FitnessError> {
+        let mut outputs = vec![0.0; OUTPUT_COUNT];
+        for (output_idx, output) in outputs.iter_mut().enumerate() {
+            let base = output_idx * (INPUT_COUNT + 1);
+            let mut sum = self.params.get(base + INPUT_COUNT).copied().unwrap_or(0.0);
+            for input_idx in 0..INPUT_COUNT {
+                sum += inputs.get(input_idx).copied().unwrap_or(0.0)
+                    * self.params.get(base + input_idx).copied().unwrap_or(0.0);
+            }
+            *output = sum.tanh();
+        }
+        Ok(outputs)
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BlackjackConfigProfile {
@@ -337,7 +386,7 @@ impl Phase {
 fn run_shoe(
     genome_id: GenomeId,
     seed: u64,
-    network: &mut RecurrentNetwork,
+    network: &mut dyn BlackjackPolicy,
 ) -> Result<ShoeReport, FitnessError> {
     network.reset();
     let genome_seed = genome_id.raw().max(0) as u64;
@@ -361,7 +410,7 @@ fn run_shoe(
 
 fn play_round(
     shoe: &mut Shoe,
-    network: &mut RecurrentNetwork,
+    network: &mut dyn BlackjackPolicy,
     last_action: &mut Action,
 ) -> Result<ShoeReport, FitnessError> {
     let mut report = ShoeReport {
@@ -454,7 +503,7 @@ fn play_round(
 
 fn play_player_hand(
     shoe: &mut Shoe,
-    network: &mut RecurrentNetwork,
+    network: &mut dyn BlackjackPolicy,
     hands: &mut Vec<Hand>,
     index: usize,
     dealer_upcard: u8,
@@ -489,9 +538,7 @@ fn play_player_hand(
             0,
             shoe,
         );
-        let outputs = network
-            .activate(&state.inputs())
-            .map_err(|err| FitnessError::new(err.to_string()))?;
+        let outputs = network.activate(&state.inputs())?;
         let action = Action::from_outputs(&outputs, &legal);
         *last_action = action;
 
@@ -622,7 +669,7 @@ impl ShoeReport {
 
 fn deal_public_card(
     shoe: &mut Shoe,
-    network: &mut RecurrentNetwork,
+    network: &mut dyn BlackjackPolicy,
     hand: &mut Hand,
     dealer_upcard: u8,
     phase: Phase,
@@ -641,7 +688,7 @@ fn deal_public_card(
 }
 
 fn observe_hand(
-    network: &mut RecurrentNetwork,
+    network: &mut dyn BlackjackPolicy,
     hand: &Hand,
     dealer_upcard: u8,
     last_action: Action,
@@ -664,15 +711,13 @@ fn observe_hand(
             exposed_card: *card,
             shoe_progress: shoe.progress(),
         };
-        network
-            .activate(&state.inputs())
-            .map_err(|err| FitnessError::new(err.to_string()))?;
+        network.activate(&state.inputs())?;
     }
     Ok(())
 }
 
 fn observe_card(
-    network: &mut RecurrentNetwork,
+    network: &mut dyn BlackjackPolicy,
     hand: &Hand,
     dealer_upcard: u8,
     last_action: Action,
@@ -695,9 +740,7 @@ fn observe_card(
         exposed_card,
         shoe_progress: shoe.progress(),
     };
-    network
-        .activate(&state.inputs())
-        .map_err(|err| FitnessError::new(err.to_string()))?;
+    network.activate(&state.inputs())?;
     Ok(())
 }
 
@@ -792,8 +835,328 @@ fn evaluate_report(
     })
 }
 
+fn evaluate_linear_params(params: &[f64], target_rounds: usize, seed_base: u64) -> ShoeReport {
+    let mut total = ShoeReport::default();
+    let mut shoes = 0usize;
+    while total.rounds < target_rounds.max(1) {
+        let seed = TRAIN_SHOES[shoes % TRAIN_SHOES.len()]
+            + seed_base
+            + ((shoes / TRAIN_SHOES.len()) as u64 * 10_007);
+        let mut policy = LinearBlackjackPolicy::new(params);
+        match run_shoe(GenomeId::new(0), seed, &mut policy) {
+            Ok(report) => total.absorb(report),
+            Err(_) => {
+                total.losses += 1;
+                total.rounds += 1;
+                total.profit -= 1.0;
+            }
+        }
+        shoes += 1;
+    }
+    if shoes > 0 {
+        total.fitness /= shoes as f64;
+        total.profit /= shoes as f64;
+    }
+    total
+}
+
+fn linear_train_fitness(params: &[f64], seed_base: u64) -> f64 {
+    let mut total = 0.0;
+    for seed in TRAIN_SHOES {
+        let mut policy = LinearBlackjackPolicy::new(params);
+        match run_shoe(GenomeId::new(0), seed ^ seed_base, &mut policy) {
+            Ok(report) => total += report.fitness,
+            Err(_) => return 0.0,
+        }
+    }
+    total / TRAIN_SHOES.len() as f64
+}
+
+#[derive(Clone)]
+struct LinearBlackjackOpenEsEval {
+    base_seed: u64,
+}
+
+impl evo_optim_rust::OpenEsEvaluator for LinearBlackjackOpenEsEval {
+    fn eval_test(&self, parameters: &[f64]) -> f64 {
+        linear_train_fitness(parameters, self.base_seed)
+    }
+
+    fn eval_train(&self, parameters: &[f64], loop_index: usize) -> f64 {
+        linear_train_fitness(parameters, self.base_seed + loop_index as u64 * 997)
+    }
+}
+
+fn initial_linear_params(base_seed: u64) -> Vec<f64> {
+    let mut initial_rng = neat_rust::algorithm::XorShiftRng::seed_from_u64(base_seed);
+    let mut initial_params = vec![0.0; LINEAR_PARAM_COUNT];
+    for param in &mut initial_params {
+        *param = (initial_rng.next_f64() * 2.0 - 1.0) * 0.05;
+    }
+    initial_params
+}
+
+fn write_linear_summary(
+    output_dir: &Path,
+    optimizer: &str,
+    base_seed: u64,
+    generations: usize,
+    population_size: usize,
+    train_rounds: usize,
+    best_score: f64,
+    best_params: &[f64],
+) -> Result<(), Box<dyn Error>> {
+    let report = evaluate_linear_params(best_params, DEFAULT_REPORT_ROUNDS, base_seed + 99_000);
+    let resolved = (report.wins + report.losses + report.pushes).max(1);
+    let ev_per_round = report.profit / report.rounds.max(1) as f64;
+    fs::write(
+        output_dir.join("models").join("winner_params.json"),
+        format!("{}\n", serde_json::to_string_pretty(best_params)?),
+    )?;
+    let summary = serde_json::json!({
+        "sample": "blackjack",
+        "optimizer": optimizer,
+        "base_seed": base_seed,
+        "generations": generations,
+        "population_size": population_size,
+        "report_rounds_target": train_rounds,
+        "params": LINEAR_PARAM_COUNT,
+        "best_score": best_score,
+        "report": {
+            "fitness": report.fitness,
+            "avg_profit_per_shoe": report.profit,
+            "ev_per_round": ev_per_round,
+            "win_rate": report.wins as f64 / resolved as f64,
+            "rounds": report.rounds,
+            "hands": report.hands,
+            "wins": report.wins,
+            "losses": report.losses,
+            "pushes": report.pushes,
+            "busts": report.busts,
+            "blackjacks": report.blackjacks,
+            "doubled": report.doubled,
+            "split": report.split,
+            "surrendered": report.surrendered
+        }
+    });
+    fs::write(
+        output_dir.join("run_summary.json"),
+        format!("{}\n", serde_json::to_string_pretty(&summary)?),
+    )?;
+    println!(
+        "blackjack optimizer={} generations={} population={} report_rounds={} best_score={:.2} ev_per_round={:.4} win_rate={:.3} artifacts_dir={}",
+        optimizer,
+        generations,
+        population_size,
+        train_rounds,
+        best_score,
+        ev_per_round,
+        report.wins as f64 / resolved as f64,
+        output_dir.display()
+    );
+    Ok(())
+}
+
+fn run_openes_mode(args: &[String]) -> Result<(), Box<dyn Error>> {
+    let generations = args
+        .get(1)
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(10);
+    let train_rounds = args
+        .get(2)
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(DEFAULT_REPORT_ROUNDS);
+    let population_size = args
+        .get(3)
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(72);
+    let base_seed = args
+        .get(4)
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(DEFAULT_BASE_SEED);
+    let output_dir = args
+        .get(5)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from("..")
+                .join("logs")
+                .join("ES")
+                .join(format!("blackjack_openes_seed{base_seed}"))
+        });
+    prepare_output_dir(&output_dir)?;
+
+    let samples = (population_size / 2).max(1);
+    let mut adam = evo_optim_rust::Adam::default();
+    adam.set_lr(0.03);
+    let mut openes = evo_optim_rust::OpenEs::new(adam, LinearBlackjackOpenEsEval { base_seed });
+    openes
+        .set_params(initial_linear_params(base_seed))
+        .set_std(0.05)
+        .set_samples(samples);
+
+    let checkpointer = evo_optim_rust::Checkpointer::new(
+        Some(1),
+        output_dir
+            .join("checkpoints")
+            .join("openes_gen")
+            .to_string_lossy(),
+    );
+    let metrics_path = output_dir.join("metrics").join("openes.ndjson");
+    let mut best_score = f64::NEG_INFINITY;
+    let mut best_params = openes.get_params().to_vec();
+    for generation in 0..generations {
+        let candidates = openes.ask(base_seed + generation as u64);
+        let scores = candidates
+            .iter()
+            .map(|candidate| {
+                let score = linear_train_fitness(&candidate.params, base_seed + generation as u64 * 997);
+                if score > best_score {
+                    best_score = score;
+                    best_params = candidate.params.clone();
+                }
+                evo_optim_rust::CandidateScore {
+                    sample_index: candidate.sample_index,
+                    sign: candidate.sign,
+                    score,
+                }
+            })
+            .collect::<Vec<_>>();
+        let report = openes.tell(
+            &candidates,
+            &scores,
+            evo_optim_rust::ScoreTransform::CenteredRank,
+        );
+        let metrics = evo_optim_rust::OpenEsGenerationMetrics::from_report(
+            &report,
+            &candidates,
+            &scores,
+            openes.get_params(),
+        );
+        evo_optim_rust::append_jsonl(&metrics_path, &metrics)?;
+        checkpointer.save_checkpoint(
+            openes.generation(),
+            &evo_optim_rust::OpenEsCheckpointState {
+                generation: openes.generation(),
+                params: openes.get_params().to_vec(),
+                best_score,
+                best_params: best_params.clone(),
+                samples,
+                noise_std: openes.noise_std(),
+            },
+        )?;
+        println!(
+            "[generation blackjack-openes] gen={} best={:.3} mean={:.3} grad_norm={:.4}",
+            metrics.generation, best_score, metrics.mean_score, metrics.gradient_norm
+        );
+    }
+    write_linear_summary(
+        &output_dir,
+        "openes",
+        base_seed,
+        generations,
+        samples * 2,
+        train_rounds,
+        best_score,
+        &best_params,
+    )
+}
+
+fn run_cma_mode(args: &[String]) -> Result<(), Box<dyn Error>> {
+    let generations = args
+        .get(1)
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(10);
+    let train_rounds = args
+        .get(2)
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(DEFAULT_REPORT_ROUNDS);
+    let population_size = args
+        .get(3)
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(72);
+    let base_seed = args
+        .get(4)
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(DEFAULT_BASE_SEED);
+    let output_dir = args
+        .get(5)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from("..")
+                .join("logs")
+                .join("ES")
+                .join(format!("blackjack_cma_seed{base_seed}"))
+        });
+    prepare_output_dir(&output_dir)?;
+
+    let param_space = evo_optim_rust::ParamSpace {
+        dimension: LINEAR_PARAM_COUNT,
+        init_kind: evo_optim_rust::ParamInitKind::Uniform,
+        init_scale: 0.05,
+        min_value: Some(-4.0),
+        max_value: Some(4.0),
+    };
+    let initial_params = initial_linear_params(base_seed);
+
+    let mut options = evo_optim_rust::CmaRunnerOptions::generations(1);
+    options.seed = base_seed;
+    options.population_size = Some(population_size);
+    options.initial_sigma = 0.5;
+    options.checkpointer = Some(evo_optim_rust::Checkpointer::new(
+        Some(1),
+        output_dir
+            .join("checkpoints")
+            .join("cma_gen")
+            .to_string_lossy(),
+    ));
+    options.metrics_path = Some(output_dir.join("metrics").join("cma.ndjson"));
+
+    let eval_counter = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let eval_counter_closure = std::sync::Arc::clone(&eval_counter);
+    let evaluator = move |params: &[f64]| {
+        let eval_id = eval_counter_closure.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        linear_train_fitness(params, base_seed + eval_id * 997)
+    };
+    let mut runner =
+        evo_optim_rust::CmaTrainRunner::new(param_space, initial_params, evaluator, options)?;
+    for _ in 0..generations {
+        let termination = runner.run_generation()?;
+        let metrics = runner.metrics();
+        println!(
+            "[generation blackjack-cma] gen={} best={:.3} current_best={:.3} sigma={:.4}",
+            metrics.generation, metrics.best_score, metrics.current_best_score, metrics.sigma
+        );
+        if termination.is_some() {
+            break;
+        }
+    }
+    let checkpoint = runner.checkpoint();
+    write_linear_summary(
+        &output_dir,
+        "cma",
+        base_seed,
+        generations,
+        population_size,
+        train_rounds,
+        checkpoint.best_score,
+        &checkpoint.best_params,
+    )
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let args = env::args().skip(1).collect::<Vec<_>>();
+    if args
+        .first()
+        .is_some_and(|value| value.eq_ignore_ascii_case("cma"))
+    {
+        return run_cma_mode(&args);
+    }
+    if args
+        .first()
+        .is_some_and(|value| value.eq_ignore_ascii_case("openes"))
+    {
+        return run_openes_mode(&args);
+    }
     let generations = args
         .first()
         .and_then(|value| value.parse::<usize>().ok())
