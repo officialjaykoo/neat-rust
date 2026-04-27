@@ -885,6 +885,7 @@ fn initial_linear_params(base_seed: u64) -> Vec<f64> {
     initial_params
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write_linear_summary(
     output_dir: &Path,
     optimizer: &str,
@@ -1293,6 +1294,7 @@ fn prepare_output_dir(output_dir: &Path) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write_final_outputs(
     output_dir: &Path,
     profile: BlackjackConfigProfile,

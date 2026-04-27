@@ -63,10 +63,7 @@ macro_rules! positive_count {
 
         impl $name {
             pub fn new(value: usize) -> Self {
-                Self(
-                    NonZeroUsize::new(value.max($min))
-                        .expect("positive count is clamped to at least one"),
-                )
+                Self(NonZeroUsize::new(value.max($min)).unwrap_or(NonZeroUsize::MIN))
             }
 
             pub fn get(self) -> usize {

@@ -60,10 +60,9 @@ pub(crate) fn eval_node_memory(
     previous: f64,
     state: RecurrentMemoryState,
 ) -> RecurrentMemoryUpdate {
-    let candidate = activation(candidate_pre);
     match memory {
         RecurrentNodeMemory::None => RecurrentMemoryUpdate {
-            output: candidate,
+            output: activation(candidate_pre),
             state,
         },
         RecurrentNodeMemory::NodeGru(memory) => eval_node_gru(

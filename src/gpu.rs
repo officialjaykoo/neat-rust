@@ -450,18 +450,10 @@ where
         }
 
         for (genome_idx, input_row) in inputs.iter().enumerate().take(population_size) {
-            for dst_idx in 0..packed.max_nodes {
+            for dst_idx in packed.num_inputs..packed.max_nodes {
                 let flat_idx = node_idx(genome_idx, dst_idx, packed.max_nodes);
                 if !packed.node_mask[flat_idx] {
                     next_state[flat_idx] = 0.0;
-                    continue;
-                }
-
-                if dst_idx < packed.num_inputs {
-                    next_state[flat_idx] = input_row
-                        .get(dst_idx)
-                        .copied()
-                        .expect("expanded input row has validated input count");
                     continue;
                 }
 
@@ -490,10 +482,8 @@ where
             }
 
             for input_idx in 0..packed.num_inputs {
-                next_state[node_idx(genome_idx, input_idx, packed.max_nodes)] = input_row
-                    .get(input_idx)
-                    .copied()
-                    .expect("expanded input row has validated input count");
+                next_state[node_idx(genome_idx, input_idx, packed.max_nodes)] =
+                    input_row[input_idx];
             }
         }
 

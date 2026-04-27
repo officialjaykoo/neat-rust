@@ -255,7 +255,9 @@ fn run_command_with_timeout(
             .map_err(EvalBridgeError::CommandIo)?,
     );
 
-    let timeout = timeout.expect("timeout must exist after early return");
+    let Some(timeout) = timeout else {
+        unreachable!("timeout was handled by early return");
+    };
     let started_at = Instant::now();
     let mut timed_out = false;
     let status = loop {

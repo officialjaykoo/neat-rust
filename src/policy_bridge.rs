@@ -417,10 +417,11 @@ pub struct CompiledPolicyNodeEval {
     pub incoming: Vec<PolicyIncomingEdge>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum CompiledPolicyNodeMemory {
     #[serde(rename = "none")]
+    #[default]
     None,
     #[serde(rename = "node-gru")]
     NodeGru {
@@ -460,12 +461,6 @@ pub enum CompiledPolicyNodeMemory {
         #[serde(default = "default_hebbian_theta_decay")]
         theta_decay: f64,
     },
-}
-
-impl Default for CompiledPolicyNodeMemory {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 impl CompiledPolicyNodeMemory {
@@ -1089,30 +1084,44 @@ fn evaluate_recurrent_cpu(
             }));
         let candidate_pre = node.bias + (node.response * aggregated);
         let previous = base_snapshot[node_index];
-        let node_key = node.node_id.to_string();
-        let state = RecurrentMemoryState {
-            fast_weight: snapshot
-                .and_then(|snapshot| snapshot.node_fast_weights.get(&node_key))
-                .copied()
-                .unwrap_or(0.0),
-            threshold: snapshot
-                .and_then(|snapshot| snapshot.node_plastic_thresholds.get(&node_key))
-                .copied()
-                .unwrap_or(0.0),
+        next_values[node_index] = match node.memory_kind {
+            NodeMemoryKind::None => node.activation.apply(candidate_pre),
+            NodeMemoryKind::NodeGru => {
+                eval_node_memory(
+                    node.memory,
+                    |value| node.activation.apply(value),
+                    candidate_pre,
+                    aggregated,
+                    previous,
+                    RecurrentMemoryState::default(),
+                )
+                .output
+            }
+            NodeMemoryKind::Hebbian => {
+                let node_key = node.node_id.to_string();
+                let state = RecurrentMemoryState {
+                    fast_weight: snapshot
+                        .and_then(|snapshot| snapshot.node_fast_weights.get(&node_key))
+                        .copied()
+                        .unwrap_or(0.0),
+                    threshold: snapshot
+                        .and_then(|snapshot| snapshot.node_plastic_thresholds.get(&node_key))
+                        .copied()
+                        .unwrap_or(0.0),
+                };
+                let update = eval_node_memory(
+                    node.memory,
+                    |value| node.activation.apply(value),
+                    candidate_pre,
+                    aggregated,
+                    previous,
+                    state,
+                );
+                node_fast_weights.insert(node_key.clone(), update.state.fast_weight);
+                node_plastic_thresholds.insert(node_key, update.state.threshold);
+                update.output
+            }
         };
-        let update = eval_node_memory(
-            node.memory,
-            |value| node.activation.apply(value),
-            candidate_pre,
-            aggregated,
-            previous,
-            state,
-        );
-        if matches!(node.memory_kind, NodeMemoryKind::Hebbian) {
-            node_fast_weights.insert(node_key.clone(), update.state.fast_weight);
-            node_plastic_thresholds.insert(node_key.clone(), update.state.threshold);
-        }
-        next_values[node_index] = update.output;
     }
 
     let outputs = spec

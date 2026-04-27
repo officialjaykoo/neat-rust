@@ -162,16 +162,32 @@ impl RecurrentNetwork {
             );
             let previous = self.values[input_index][node_index];
             let candidate_pre = node_eval.bias + node_eval.response * aggregated;
-            let update = eval_node_memory(
-                node_eval.memory,
-                |value| node_eval.activation.apply(value),
-                candidate_pre,
-                aggregated,
-                previous,
-                self.memory_states[node_index],
-            );
-            self.memory_states[node_index] = update.state;
-            self.values[output_index][node_index] = update.output;
+            self.values[output_index][node_index] = match node_eval.memory {
+                RecurrentNodeMemory::None => node_eval.activation.apply(candidate_pre),
+                RecurrentNodeMemory::NodeGru(_) => {
+                    eval_node_memory(
+                        node_eval.memory,
+                        |value| node_eval.activation.apply(value),
+                        candidate_pre,
+                        aggregated,
+                        previous,
+                        Default::default(),
+                    )
+                    .output
+                }
+                RecurrentNodeMemory::Hebbian(_) => {
+                    let update = eval_node_memory(
+                        node_eval.memory,
+                        |value| node_eval.activation.apply(value),
+                        candidate_pre,
+                        aggregated,
+                        previous,
+                        self.memory_states[node_index],
+                    );
+                    self.memory_states[node_index] = update.state;
+                    update.output
+                }
+            };
         }
 
         Ok(self
