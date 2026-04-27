@@ -86,8 +86,6 @@ pub enum NodeMemoryKind {
     None,
     NodeGru,
     Hebbian,
-    LinearGate,
-    LinearGateV2,
 }
 
 impl NodeMemoryKind {
@@ -96,11 +94,6 @@ impl NodeMemoryKind {
             "none" | "plain" => Some(Self::None),
             "node-gru" | "node_gru" | "gru" => Some(Self::NodeGru),
             "hebbian" | "fast-weight" | "fast_weight" => Some(Self::Hebbian),
-            "linear-gate" | "linear_gate" | "linear" | "gated-linear" | "gated_linear" => {
-                Some(Self::LinearGate)
-            }
-            "linear-gate-v2" | "linear_gate_v2" | "linear-v2" | "linear_v2" | "rg-lru-lite"
-            | "rg_lru_lite" => Some(Self::LinearGateV2),
             _ => None,
         }
     }
@@ -110,8 +103,6 @@ impl NodeMemoryKind {
             Self::None => "none",
             Self::NodeGru => "node-gru",
             Self::Hebbian => "hebbian",
-            Self::LinearGate => "linear-gate",
-            Self::LinearGateV2 => "rg-lru-lite",
         }
     }
 }
@@ -702,16 +693,6 @@ pub struct GenomeConfig {
     pub node_hebbian_mod_bias: FloatAttributeConfig,
     pub node_hebbian_mod_response: FloatAttributeConfig,
     pub node_hebbian_theta_decay: FloatAttributeConfig,
-    pub node_linear_decay_bias: FloatAttributeConfig,
-    pub node_linear_decay_response: FloatAttributeConfig,
-    pub node_linear_write_weight: FloatAttributeConfig,
-    pub node_linear_gate_bias: FloatAttributeConfig,
-    pub node_linear_gate_response: FloatAttributeConfig,
-    pub node_linear_min_decay: FloatAttributeConfig,
-    pub node_linear_input_mix: FloatAttributeConfig,
-    pub node_linear_memory_weight: FloatAttributeConfig,
-    pub node_linear_trace_decay: FloatAttributeConfig,
-    pub node_linear_trace_weight: FloatAttributeConfig,
     pub enabled: BoolAttributeConfig,
     pub compatibility_disjoint_coefficient: f64,
     pub compatibility_excess_coefficient: CompatibilityExcessCoefficient,
@@ -1129,56 +1110,6 @@ impl Config {
             "genome.node_hebbian_theta_decay",
             "node_hebbian_theta_decay",
             &self.genome.node_hebbian_theta_decay,
-        )?;
-        validate_float_attribute(
-            "genome.node_linear_decay_bias",
-            "node_linear_decay_bias",
-            &self.genome.node_linear_decay_bias,
-        )?;
-        validate_float_attribute(
-            "genome.node_linear_decay_response",
-            "node_linear_decay_response",
-            &self.genome.node_linear_decay_response,
-        )?;
-        validate_float_attribute(
-            "genome.node_linear_write_weight",
-            "node_linear_write_weight",
-            &self.genome.node_linear_write_weight,
-        )?;
-        validate_float_attribute(
-            "genome.node_linear_gate_bias",
-            "node_linear_gate_bias",
-            &self.genome.node_linear_gate_bias,
-        )?;
-        validate_float_attribute(
-            "genome.node_linear_gate_response",
-            "node_linear_gate_response",
-            &self.genome.node_linear_gate_response,
-        )?;
-        validate_float_attribute(
-            "genome.node_linear_min_decay",
-            "node_linear_min_decay",
-            &self.genome.node_linear_min_decay,
-        )?;
-        validate_float_attribute(
-            "genome.node_linear_input_mix",
-            "node_linear_input_mix",
-            &self.genome.node_linear_input_mix,
-        )?;
-        validate_float_attribute(
-            "genome.node_linear_memory_weight",
-            "node_linear_memory_weight",
-            &self.genome.node_linear_memory_weight,
-        )?;
-        validate_float_attribute(
-            "genome.node_linear_trace_decay",
-            "node_linear_trace_decay",
-            &self.genome.node_linear_trace_decay,
-        )?;
-        validate_float_attribute(
-            "genome.node_linear_trace_weight",
-            "node_linear_trace_weight",
-            &self.genome.node_linear_trace_weight,
         )?;
         validate_float_attribute("genome.weight", "weight", &self.genome.weight)?;
 

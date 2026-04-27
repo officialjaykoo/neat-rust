@@ -114,16 +114,6 @@ struct RawGenomeConfig {
     node_hebbian_mod_bias: Option<RawFloatAttribute>,
     node_hebbian_mod_response: Option<RawFloatAttribute>,
     node_hebbian_theta_decay: Option<RawFloatAttribute>,
-    node_linear_decay_bias: Option<RawFloatAttribute>,
-    node_linear_decay_response: Option<RawFloatAttribute>,
-    node_linear_write_weight: Option<RawFloatAttribute>,
-    node_linear_gate_bias: Option<RawFloatAttribute>,
-    node_linear_gate_response: Option<RawFloatAttribute>,
-    node_linear_min_decay: Option<RawFloatAttribute>,
-    node_linear_input_mix: Option<RawFloatAttribute>,
-    node_linear_memory_weight: Option<RawFloatAttribute>,
-    node_linear_trace_decay: Option<RawFloatAttribute>,
-    node_linear_trace_weight: Option<RawFloatAttribute>,
     enabled: RawBoolAttribute,
     compatibility_disjoint_coefficient: f64,
     compatibility_excess_coefficient: Option<String>,
@@ -222,7 +212,7 @@ impl RawGenomeConfig {
                     value.into_choice_config(
                         "genome.node_memory_kind",
                         NodeMemoryKind::parse,
-                        "none, node-gru, hebbian, linear-gate, or rg-lru-lite",
+                        "none, node-gru, or hebbian",
                     )
                 })
                 .transpose()?
@@ -319,56 +309,6 @@ impl RawGenomeConfig {
                 .map(RawFloatAttribute::into_config)
                 .transpose()?
                 .unwrap_or_else(default_node_hebbian_theta_decay_attribute),
-            node_linear_decay_bias: self
-                .node_linear_decay_bias
-                .map(RawFloatAttribute::into_config)
-                .transpose()?
-                .unwrap_or_else(default_node_gate_bias_attribute),
-            node_linear_decay_response: self
-                .node_linear_decay_response
-                .map(RawFloatAttribute::into_config)
-                .transpose()?
-                .unwrap_or_else(default_node_gate_response_attribute),
-            node_linear_write_weight: self
-                .node_linear_write_weight
-                .map(RawFloatAttribute::into_config)
-                .transpose()?
-                .unwrap_or_else(default_node_weight_attribute),
-            node_linear_gate_bias: self
-                .node_linear_gate_bias
-                .map(RawFloatAttribute::into_config)
-                .transpose()?
-                .unwrap_or_else(default_node_gate_bias_attribute),
-            node_linear_gate_response: self
-                .node_linear_gate_response
-                .map(RawFloatAttribute::into_config)
-                .transpose()?
-                .unwrap_or_else(default_node_gate_response_attribute),
-            node_linear_min_decay: self
-                .node_linear_min_decay
-                .map(RawFloatAttribute::into_config)
-                .transpose()?
-                .unwrap_or_else(default_node_linear_min_decay_attribute),
-            node_linear_input_mix: self
-                .node_linear_input_mix
-                .map(RawFloatAttribute::into_config)
-                .transpose()?
-                .unwrap_or_else(default_node_zero_weight_attribute),
-            node_linear_memory_weight: self
-                .node_linear_memory_weight
-                .map(RawFloatAttribute::into_config)
-                .transpose()?
-                .unwrap_or_else(default_node_linear_memory_weight_attribute),
-            node_linear_trace_decay: self
-                .node_linear_trace_decay
-                .map(RawFloatAttribute::into_config)
-                .transpose()?
-                .unwrap_or_else(default_node_linear_trace_decay_attribute),
-            node_linear_trace_weight: self
-                .node_linear_trace_weight
-                .map(RawFloatAttribute::into_config)
-                .transpose()?
-                .unwrap_or_else(default_node_zero_weight_attribute),
             enabled: self.enabled.into_config(),
             compatibility_disjoint_coefficient: self.compatibility_disjoint_coefficient,
             compatibility_excess_coefficient: self
@@ -873,16 +813,4 @@ fn default_node_gate_bias_attribute() -> FloatAttributeConfig {
 
 fn default_node_gate_response_attribute() -> FloatAttributeConfig {
     default_float_attribute(1.0, -5.0, 5.0)
-}
-
-fn default_node_linear_min_decay_attribute() -> FloatAttributeConfig {
-    default_float_attribute(0.5, 0.0, 0.99)
-}
-
-fn default_node_linear_memory_weight_attribute() -> FloatAttributeConfig {
-    default_float_attribute(1.0, 0.0, 1.5)
-}
-
-fn default_node_linear_trace_decay_attribute() -> FloatAttributeConfig {
-    default_float_attribute(0.8, 0.0, 0.99)
 }

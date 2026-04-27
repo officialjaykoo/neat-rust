@@ -1,6 +1,5 @@
 use crate::network_impl::recurrent_memory::{
-    NodeGruMemory, NodeHebbianMemory, NodeLinearGateMemory, NodeLinearGateV2Memory,
-    RecurrentNodeMemory,
+    NodeGruMemory, NodeHebbianMemory, RecurrentNodeMemory,
 };
 
 use super::{CompiledPolicyNodeEval, CompiledPolicyNodeMemory};
@@ -45,42 +44,6 @@ pub(super) fn policy_node_memory(node: &CompiledPolicyNodeEval) -> RecurrentNode
             mod_bias: *mod_bias,
             mod_response: *mod_response,
             theta_decay: *theta_decay,
-        }),
-        CompiledPolicyNodeMemory::LinearGate {
-            decay_bias,
-            decay_response,
-            write_weight,
-            gate_bias,
-            gate_response,
-        } => RecurrentNodeMemory::LinearGate(NodeLinearGateMemory {
-            decay_bias: *decay_bias,
-            decay_response: *decay_response,
-            write_weight: *write_weight,
-            gate_bias: *gate_bias,
-            gate_response: *gate_response,
-        }),
-        CompiledPolicyNodeMemory::RgLruLite {
-            decay_bias,
-            decay_response,
-            write_weight,
-            gate_bias,
-            gate_response,
-            min_decay,
-            input_mix,
-            memory_weight,
-            trace_decay,
-            trace_weight,
-        } => RecurrentNodeMemory::LinearGateV2(NodeLinearGateV2Memory {
-            decay_bias: *decay_bias,
-            decay_response: *decay_response,
-            write_weight: *write_weight,
-            gate_bias: *gate_bias,
-            gate_response: *gate_response,
-            min_decay: *min_decay,
-            input_mix: *input_mix,
-            memory_weight: *memory_weight,
-            trace_decay: *trace_decay,
-            trace_weight: *trace_weight,
         }),
     }
 }

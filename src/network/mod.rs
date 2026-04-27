@@ -12,7 +12,4 @@ pub use iznn::{
     RESONATOR_PARAMS, THALAMO_CORTICAL_PARAMS,
 };
 pub use recurrent::{RecurrentConnectionEval, RecurrentError, RecurrentNetwork, RecurrentNodeEval};
-pub use recurrent_memory::{
-    NodeGruMemory, NodeHebbianMemory, NodeLinearGateMemory, NodeLinearGateV2Memory,
-    RecurrentNodeMemory,
-};
+pub use recurrent_memory::{NodeGruMemory, NodeHebbianMemory, RecurrentNodeMemory};

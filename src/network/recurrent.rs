@@ -9,8 +9,7 @@ use crate::gene::{DefaultNodeGene, NodeKey};
 use crate::genome::{input_keys, output_keys, DefaultGenome};
 use crate::graph::required_for_output;
 use crate::network_impl::recurrent_memory::{
-    eval_node_memory, NodeGruMemory, NodeHebbianMemory, NodeLinearGateMemory,
-    NodeLinearGateV2Memory, RecurrentMemoryState, RecurrentNodeMemory,
+    eval_node_memory, NodeGruMemory, NodeHebbianMemory, RecurrentMemoryState, RecurrentNodeMemory,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -300,25 +299,6 @@ fn memory_from_gene(gene: &DefaultNodeGene) -> RecurrentNodeMemory {
             mod_bias: gene.node_hebbian_mod_bias,
             mod_response: gene.node_hebbian_mod_response,
             theta_decay: gene.node_hebbian_theta_decay,
-        }),
-        NodeMemoryKind::LinearGate => RecurrentNodeMemory::LinearGate(NodeLinearGateMemory {
-            decay_bias: gene.node_linear_decay_bias,
-            decay_response: gene.node_linear_decay_response,
-            write_weight: gene.node_linear_write_weight,
-            gate_bias: gene.node_linear_gate_bias,
-            gate_response: gene.node_linear_gate_response,
-        }),
-        NodeMemoryKind::LinearGateV2 => RecurrentNodeMemory::LinearGateV2(NodeLinearGateV2Memory {
-            decay_bias: gene.node_linear_decay_bias,
-            decay_response: gene.node_linear_decay_response,
-            write_weight: gene.node_linear_write_weight,
-            gate_bias: gene.node_linear_gate_bias,
-            gate_response: gene.node_linear_gate_response,
-            min_decay: gene.node_linear_min_decay,
-            input_mix: gene.node_linear_input_mix,
-            memory_weight: gene.node_linear_memory_weight,
-            trace_decay: gene.node_linear_trace_decay,
-            trace_weight: gene.node_linear_trace_weight,
         }),
     }
 }

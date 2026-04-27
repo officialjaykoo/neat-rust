@@ -9,7 +9,6 @@ node-GRU / cell-tree > connection-GRU > plain bootstrap > memory-gate > plain
 ```
 
 There is no new `node_memory_kind` sweep for Lunar Lander yet. The old result
-is useful, but it should be treated as historical until v2/Hebbian/linear-gate
 are tested under the new system.
 
 ## Legacy 1000-Generation Record
@@ -40,7 +39,7 @@ samples. The old node-GRU/cell result beat connection-GRU by about 13.4%.
 But this result predates the current cleanup. The next useful Lunar test is:
 
 ```text
-plain / node-GRU v2 / Hebbian / linear-gate
+plain / node-GRU v2 / Hebbian
 1000 generations each
 same seed set if practical
 ```

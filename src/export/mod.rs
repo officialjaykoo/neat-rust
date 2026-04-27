@@ -129,27 +129,6 @@ fn push_node_memory(memory: &mut JsonObjectWriter<'_>, node: &crate::gene::Defau
             memory.f64_field("mod_response", node.node_hebbian_mod_response);
             memory.f64_field("theta_decay", node.node_hebbian_theta_decay);
         }
-        NodeMemoryKind::LinearGate => {
-            memory.string_field("kind", "linear-gate");
-            memory.f64_field("decay_bias", node.node_linear_decay_bias);
-            memory.f64_field("decay_response", node.node_linear_decay_response);
-            memory.f64_field("write_weight", node.node_linear_write_weight);
-            memory.f64_field("gate_bias", node.node_linear_gate_bias);
-            memory.f64_field("gate_response", node.node_linear_gate_response);
-        }
-        NodeMemoryKind::LinearGateV2 => {
-            memory.string_field("kind", "rg-lru-lite");
-            memory.f64_field("decay_bias", node.node_linear_decay_bias);
-            memory.f64_field("decay_response", node.node_linear_decay_response);
-            memory.f64_field("write_weight", node.node_linear_write_weight);
-            memory.f64_field("gate_bias", node.node_linear_gate_bias);
-            memory.f64_field("gate_response", node.node_linear_gate_response);
-            memory.f64_field("min_decay", node.node_linear_min_decay);
-            memory.f64_field("input_mix", node.node_linear_input_mix);
-            memory.f64_field("memory_weight", node.node_linear_memory_weight);
-            memory.f64_field("trace_decay", node.node_linear_trace_decay);
-            memory.f64_field("trace_weight", node.node_linear_trace_weight);
-        }
     }
 }
 

@@ -105,11 +105,11 @@ pub mod network {
     };
     pub use crate::network_impl::{
         Ctrnn, CtrnnError, CtrnnNodeEval, FeedForwardError, FeedForwardNetwork, IzNeuron, IzParams,
-        Iznn, IznnError, NodeEval, NodeGruMemory, NodeHebbianMemory, NodeLinearGateMemory,
-        NodeLinearGateV2Memory, RecurrentConnectionEval, RecurrentError, RecurrentNetwork,
-        RecurrentNodeEval, RecurrentNodeMemory, CHATTERING_PARAMS, FAST_SPIKING_PARAMS,
-        INTRINSICALLY_BURSTING_PARAMS, LOW_THRESHOLD_SPIKING_PARAMS, REGULAR_SPIKING_PARAMS,
-        RESONATOR_PARAMS, THALAMO_CORTICAL_PARAMS,
+        Iznn, IznnError, NodeEval, NodeGruMemory, NodeHebbianMemory, RecurrentConnectionEval,
+        RecurrentError, RecurrentNetwork, RecurrentNodeEval, RecurrentNodeMemory,
+        CHATTERING_PARAMS, FAST_SPIKING_PARAMS, INTRINSICALLY_BURSTING_PARAMS,
+        LOW_THRESHOLD_SPIKING_PARAMS, REGULAR_SPIKING_PARAMS, RESONATOR_PARAMS,
+        THALAMO_CORTICAL_PARAMS,
     };
 }
 

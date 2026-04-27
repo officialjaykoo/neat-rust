@@ -16,7 +16,7 @@ It ran:
 
 ```text
 games: blackjack, mountain_car, flappy_bird, snake_cli
-profiles: plain, node-gru, hebbian, linear-gate
+profiles: plain, node-gru, hebbian
 seeds: 701, 702, 703
 generations: 100
 parallelism: 6
@@ -43,7 +43,7 @@ read: explicit memory helps, but the task saturates quickly
 Flappy Bird:
 
 ```text
-winner: linear-gate in the 100-generation sweep
+winner: see current profile sweep
 reason: best average and best single seed
 read: likely a simple timing smoother, not proof that it is a better memory model
 ```

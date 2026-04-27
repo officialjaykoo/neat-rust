@@ -5,7 +5,7 @@
 For the current 100-generation, 3-seed sweep:
 
 ```text
-Hebbian > plain > linear-gate > node-GRU
+Hebbian > plain > node-GRU
 ```
 
 Hebbian is the clear current winner. Node-GRU v2 performed poorly in this short
@@ -32,7 +32,6 @@ Result by average report fitness:
 ```text
 Hebbian      avg 167.27   best seed 702   231.94   27 apples
 plain        avg  85.61   best seed 702   145.90   19 apples
-linear-gate  avg  50.61   best seed 701    63.52    8 apples
 node-GRU     avg  15.12   best seed 702    22.87    4 apples
 ```
 

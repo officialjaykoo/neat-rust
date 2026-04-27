@@ -8,8 +8,8 @@ use neat_rust::{
     io::{Config, NodeMemoryKind},
     network::{
         Ctrnn, FeedForwardError, FeedForwardNetwork, Iznn, NodeEval, NodeGruMemory,
-        NodeLinearGateMemory, RecurrentConnectionEval, RecurrentError, RecurrentNetwork,
-        RecurrentNodeEval, RecurrentNodeMemory,
+        RecurrentConnectionEval, RecurrentError, RecurrentNetwork, RecurrentNodeEval,
+        RecurrentNodeMemory,
     },
     prelude::{ActivationFunction, AggregationFunction},
 };
@@ -212,28 +212,6 @@ fn recurrent_network_uses_previous_state_for_self_loop() {
 
     assert_eq!(first[0], 1.0);
     assert_eq!(second[0], 0.5);
-}
-
-#[test]
-fn recurrent_linear_gate_converges_and_resets() {
-    let mut node = recurrent_node(vec![recurrent_link(-1, 1.0)]);
-    node.memory = RecurrentNodeMemory::LinearGate(NodeLinearGateMemory {
-        decay_bias: 0.0,
-        decay_response: 0.0,
-        write_weight: 1.0,
-        gate_bias: 20.0,
-        gate_response: 0.0,
-    });
-    let mut network = RecurrentNetwork::new(vec![-1], vec![0], vec![node]);
-
-    let first = network.activate(&[1.0]).expect("first step should run");
-    let second = network.activate(&[1.0]).expect("second step should run");
-    network.reset();
-    let after_reset = network.activate(&[1.0]).expect("reset step should run");
-
-    assert!((first[0] - 0.5).abs() < 1e-8);
-    assert!((second[0] - 0.75).abs() < 1e-8);
-    assert!((after_reset[0] - 0.5).abs() < 1e-8);
 }
 
 #[test]

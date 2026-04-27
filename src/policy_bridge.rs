@@ -460,42 +460,6 @@ pub enum CompiledPolicyNodeMemory {
         #[serde(default = "default_hebbian_theta_decay")]
         theta_decay: f64,
     },
-    #[serde(rename = "linear-gate")]
-    LinearGate {
-        #[serde(default)]
-        decay_bias: f64,
-        #[serde(default = "default_one")]
-        decay_response: f64,
-        #[serde(default = "default_one")]
-        write_weight: f64,
-        #[serde(default)]
-        gate_bias: f64,
-        #[serde(default = "default_one")]
-        gate_response: f64,
-    },
-    #[serde(rename = "rg-lru-lite")]
-    RgLruLite {
-        #[serde(default)]
-        decay_bias: f64,
-        #[serde(default = "default_one")]
-        decay_response: f64,
-        #[serde(default = "default_one")]
-        write_weight: f64,
-        #[serde(default)]
-        gate_bias: f64,
-        #[serde(default = "default_one")]
-        gate_response: f64,
-        #[serde(default = "default_node_linear_min_decay")]
-        min_decay: f64,
-        #[serde(default)]
-        input_mix: f64,
-        #[serde(default = "default_one")]
-        memory_weight: f64,
-        #[serde(default = "default_node_linear_trace_decay")]
-        trace_decay: f64,
-        #[serde(default)]
-        trace_weight: f64,
-    },
 }
 
 impl Default for CompiledPolicyNodeMemory {
@@ -510,8 +474,6 @@ impl CompiledPolicyNodeMemory {
             Self::None => NodeMemoryKind::None,
             Self::NodeGru { .. } => NodeMemoryKind::NodeGru,
             Self::Hebbian { .. } => NodeMemoryKind::Hebbian,
-            Self::LinearGate { .. } => NodeMemoryKind::LinearGate,
-            Self::RgLruLite { .. } => NodeMemoryKind::LinearGateV2,
         }
     }
 }
@@ -644,8 +606,6 @@ pub struct CompiledPolicySnapshot {
     pub node_fast_weights: BTreeMap<String, f64>,
     #[serde(default)]
     pub node_plastic_thresholds: BTreeMap<String, f64>,
-    #[serde(default)]
-    pub node_linear_traces: BTreeMap<String, f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1116,7 +1076,6 @@ fn evaluate_recurrent_cpu(
     let mut next_values = vec![0.0; spec.node_evals.len()];
     let mut node_fast_weights = BTreeMap::new();
     let mut node_plastic_thresholds = BTreeMap::new();
-    let mut node_linear_traces = BTreeMap::new();
 
     for (node_index, node) in spec.node_evals.iter().enumerate() {
         let aggregated = node
@@ -1140,10 +1099,6 @@ fn evaluate_recurrent_cpu(
                 .and_then(|snapshot| snapshot.node_plastic_thresholds.get(&node_key))
                 .copied()
                 .unwrap_or(0.0),
-            linear_trace: snapshot
-                .and_then(|snapshot| snapshot.node_linear_traces.get(&node_key))
-                .copied()
-                .unwrap_or(0.0),
         };
         let update = eval_node_memory(
             node.memory,
@@ -1156,9 +1111,6 @@ fn evaluate_recurrent_cpu(
         if matches!(node.memory_kind, NodeMemoryKind::Hebbian) {
             node_fast_weights.insert(node_key.clone(), update.state.fast_weight);
             node_plastic_thresholds.insert(node_key.clone(), update.state.threshold);
-        }
-        if matches!(node.memory_kind, NodeMemoryKind::LinearGateV2) {
-            node_linear_traces.insert(node_key, update.state.linear_trace);
         }
         next_values[node_index] = update.output;
     }
@@ -1175,7 +1127,6 @@ fn evaluate_recurrent_cpu(
             &next_values,
             node_fast_weights,
             node_plastic_thresholds,
-            node_linear_traces,
         ),
     )
 }
@@ -1201,7 +1152,6 @@ fn dense_snapshot_to_json(
     values: &[f64],
     node_fast_weights: BTreeMap<String, f64>,
     node_plastic_thresholds: BTreeMap<String, f64>,
-    node_linear_traces: BTreeMap<String, f64>,
 ) -> CompiledPolicySnapshot {
     let mut node_values = BTreeMap::new();
     for (index, node) in spec.node_evals.iter().enumerate() {
@@ -1214,7 +1164,6 @@ fn dense_snapshot_to_json(
         node_values,
         node_fast_weights,
         node_plastic_thresholds,
-        node_linear_traces,
     }
 }
 
@@ -1224,14 +1173,6 @@ fn sigmoid(value: f64) -> f64 {
 
 fn default_one() -> f64 {
     1.0
-}
-
-fn default_node_linear_min_decay() -> f64 {
-    0.5
-}
-
-fn default_node_linear_trace_decay() -> f64 {
-    0.8
 }
 
 fn default_hebbian_decay() -> f64 {
@@ -1336,25 +1277,6 @@ mod tests {
                 mod_response: 1.0,
                 theta_decay: default_hebbian_theta_decay(),
             },
-            NodeMemoryKind::LinearGate => CompiledPolicyNodeMemory::LinearGate {
-                decay_bias: 0.0,
-                decay_response: 1.0,
-                write_weight: 1.0,
-                gate_bias: 0.0,
-                gate_response: 1.0,
-            },
-            NodeMemoryKind::LinearGateV2 => CompiledPolicyNodeMemory::RgLruLite {
-                decay_bias: 0.0,
-                decay_response: 1.0,
-                write_weight: 1.0,
-                gate_bias: 0.0,
-                gate_response: 1.0,
-                min_decay: default_node_linear_min_decay(),
-                input_mix: 0.0,
-                memory_weight: 1.0,
-                trace_decay: default_node_linear_trace_decay(),
-                trace_weight: 0.0,
-            },
         }
     }
 
@@ -1405,49 +1327,6 @@ mod tests {
         assert_eq!(result.outputs.len(), 1);
         assert!((result.outputs[0][0] - 5.5).abs() < 1e-12);
         assert!(result.snapshots.is_none());
-    }
-
-    #[test]
-    fn evaluates_recurrent_linear_gate_fixture_on_cpu() {
-        let spec = CompiledPolicySpec {
-            network_type: PolicyNetworkType::Recurrent,
-            input_count: 1,
-            output_indices: vec![0],
-            node_evals: vec![CompiledPolicyNodeEval {
-                incoming: vec![
-                    plain_edge(PolicyIncomingSource::Input, 0, 1.0),
-                    plain_edge(PolicyIncomingSource::Node, 0, 1.0),
-                ],
-                ..node(NodeMemoryKind::LinearGate, Vec::new())
-            }],
-        };
-        let mut snapshot_values = BTreeMap::new();
-        snapshot_values.insert("0".to_string(), 0.25);
-        let result = evaluate_policy_batch(
-            &spec,
-            &CompiledPolicyRequest {
-                inputs: vec![vec![1.0]],
-                snapshot: Some(CompiledPolicySnapshot {
-                    node_values: snapshot_values,
-                    ..CompiledPolicySnapshot::default()
-                }),
-            },
-            PolicyBridgeBackend::Cpu,
-        )
-        .expect("policy evaluation should succeed");
-
-        let decay = sigmoid(1.25);
-        let state = decay * 0.25 + (1.0 - decay) * 1.25;
-        let gate = sigmoid(1.25);
-        let expected_value = gate * state + (1.0 - gate) * 1.25;
-        assert!((result.outputs[0][0] - expected_value).abs() < 1e-12);
-        let snapshots = result
-            .snapshots
-            .expect("recurrent result should include snapshots");
-        let next = snapshots[0]
-            .as_ref()
-            .expect("recurrent sample should include snapshot");
-        assert!((next.node_values["0"] - expected_value).abs() < 1e-12);
     }
 
     #[test]

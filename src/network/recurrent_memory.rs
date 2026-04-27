@@ -5,8 +5,6 @@ pub enum RecurrentNodeMemory {
     None,
     NodeGru(NodeGruMemory),
     Hebbian(NodeHebbianMemory),
-    LinearGate(NodeLinearGateMemory),
-    LinearGateV2(NodeLinearGateV2Memory),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -34,33 +32,9 @@ pub struct NodeHebbianMemory {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct NodeLinearGateMemory {
-    pub decay_bias: f64,
-    pub decay_response: f64,
-    pub write_weight: f64,
-    pub gate_bias: f64,
-    pub gate_response: f64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct NodeLinearGateV2Memory {
-    pub decay_bias: f64,
-    pub decay_response: f64,
-    pub write_weight: f64,
-    pub gate_bias: f64,
-    pub gate_response: f64,
-    pub min_decay: f64,
-    pub input_mix: f64,
-    pub memory_weight: f64,
-    pub trace_decay: f64,
-    pub trace_weight: f64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RecurrentMemoryState {
     pub fast_weight: f64,
     pub threshold: f64,
-    pub linear_trace: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -74,7 +48,6 @@ impl Default for RecurrentMemoryState {
         Self {
             fast_weight: 0.0,
             threshold: 0.0,
-            linear_trace: 0.0,
         }
     }
 }
@@ -103,12 +76,6 @@ pub(crate) fn eval_node_memory(
         ),
         RecurrentNodeMemory::Hebbian(memory) => {
             eval_hebbian(memory, activation, candidate_pre, aggregated, state)
-        }
-        RecurrentNodeMemory::LinearGate(memory) => {
-            eval_linear_gate(memory, candidate, aggregated, previous, state)
-        }
-        RecurrentNodeMemory::LinearGateV2(memory) => {
-            eval_linear_gate_v2(memory, candidate, aggregated, previous, state)
         }
     }
 }
@@ -176,47 +143,5 @@ fn eval_hebbian(
         + modulation * memory.eta * plastic)
         .clamp(-2.0, 2.0);
     state.threshold = next_threshold.clamp(0.0, 4.0);
-    RecurrentMemoryUpdate { output, state }
-}
-
-fn eval_linear_gate(
-    memory: NodeLinearGateMemory,
-    candidate: f64,
-    aggregated: f64,
-    previous: f64,
-    state: RecurrentMemoryState,
-) -> RecurrentMemoryUpdate {
-    let decay = sigmoid_gate(memory.decay_bias + memory.decay_response * aggregated);
-    let write = candidate * memory.write_weight;
-    let recurrent_state = (decay * previous + (1.0 - decay) * write).clamp(-1.0, 1.0);
-    let gate = sigmoid_gate(memory.gate_bias + memory.gate_response * aggregated);
-    RecurrentMemoryUpdate {
-        output: gate * recurrent_state + (1.0 - gate) * candidate,
-        state,
-    }
-}
-
-fn eval_linear_gate_v2(
-    memory: NodeLinearGateV2Memory,
-    candidate: f64,
-    aggregated: f64,
-    previous: f64,
-    mut state: RecurrentMemoryState,
-) -> RecurrentMemoryUpdate {
-    let mixed = aggregated + memory.input_mix * previous;
-    let raw_decay = sigmoid_gate(memory.decay_bias + memory.decay_response * mixed);
-    let min_decay = memory.min_decay.clamp(0.0, 0.99);
-    let decay = min_decay + (1.0 - min_decay) * raw_decay;
-    let write_gate = sigmoid_gate(memory.gate_bias + memory.gate_response * mixed);
-    let trace_decay = memory.trace_decay.clamp(0.0, 0.99);
-    let next_trace =
-        trace_decay * state.linear_trace + (1.0 - trace_decay) * (mixed * candidate).tanh();
-    let write = (candidate * memory.write_weight + memory.trace_weight * state.linear_trace).tanh();
-    let recurrent_state = (decay * previous + (1.0 - decay) * write_gate * write).clamp(-1.0, 1.0);
-    let output = (candidate
-        + memory.memory_weight.clamp(0.0, 1.5) * (recurrent_state - candidate)
-        + memory.trace_weight * next_trace)
-        .clamp(-1.0, 1.0);
-    state.linear_trace = next_trace.clamp(-1.0, 1.0);
     RecurrentMemoryUpdate { output, state }
 }

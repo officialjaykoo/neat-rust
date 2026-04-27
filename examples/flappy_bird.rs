@@ -56,8 +56,6 @@ enum FlappyConfigProfile {
     Plain,
     NodeGru,
     Hebbian,
-    LinearGate,
-    RgLruLite,
 }
 
 impl FlappyConfigProfile {
@@ -66,13 +64,8 @@ impl FlappyConfigProfile {
             "plain" | "base" | "no-gru" | "no_gru" => Ok(Self::Plain),
             "gru" | "node-gru" | "node_gru" | "nodegru" => Ok(Self::NodeGru),
             "hebbian" | "node-hebbian" | "node_hebbian" => Ok(Self::Hebbian),
-            "linear" | "linear-gate" | "linear_gate" | "node-linear-gate"
-            | "node_linear_gate" => Ok(Self::LinearGate),
-            "rg-lru-lite" | "rg_lru_lite" | "linear-gate-v2" | "linear_gate_v2" => {
-                Ok(Self::RgLruLite)
-            }
             other => Err(format!(
-                "unknown flappy config profile {other:?}; use plain, node-gru, hebbian, linear-gate, or rg-lru-lite"
+                "unknown flappy config profile {other:?}; use plain, node-gru, or hebbian"
             )),
         }
     }
@@ -82,8 +75,6 @@ impl FlappyConfigProfile {
             Self::Plain => "plain",
             Self::NodeGru => "node-gru",
             Self::Hebbian => "hebbian",
-            Self::LinearGate => "linear-gate",
-            Self::RgLruLite => "rg-lru-lite",
         }
     }
 
@@ -92,8 +83,6 @@ impl FlappyConfigProfile {
             Self::Plain => include_str!("flappy_bird_plain_config.toml"),
             Self::NodeGru => include_str!("flappy_bird_node_gru_config.toml"),
             Self::Hebbian => include_str!("flappy_bird_hebbian_config.toml"),
-            Self::LinearGate => include_str!("flappy_bird_linear_gate_config.toml"),
-            Self::RgLruLite => include_str!("flappy_bird_rg_lru_lite_config.toml"),
         }
     }
 }

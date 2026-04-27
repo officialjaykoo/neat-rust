@@ -125,8 +125,6 @@ enum BlackjackConfigProfile {
     Plain,
     NodeGru,
     Hebbian,
-    LinearGate,
-    RgLruLite,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -153,13 +151,8 @@ impl BlackjackConfigProfile {
             "plain" | "base" | "no-gru" | "no_gru" => Ok(Self::Plain),
             "gru" | "node-gru" | "node_gru" | "nodegru" => Ok(Self::NodeGru),
             "hebbian" | "node-hebbian" | "node_hebbian" => Ok(Self::Hebbian),
-            "linear" | "linear-gate" | "linear_gate" | "node-linear-gate"
-            | "node_linear_gate" => Ok(Self::LinearGate),
-            "rg-lru-lite" | "rg_lru_lite" | "linear-gate-v2" | "linear_gate_v2" => {
-                Ok(Self::RgLruLite)
-            }
             other => Err(format!(
-                "unknown blackjack config profile {other:?}; use plain, node-gru, hebbian, linear-gate, or rg-lru-lite"
+                "unknown blackjack config profile {other:?}; use plain, node-gru, or hebbian"
             )),
         }
     }
@@ -169,8 +162,6 @@ impl BlackjackConfigProfile {
             Self::Plain => "plain",
             Self::NodeGru => "node-gru",
             Self::Hebbian => "hebbian",
-            Self::LinearGate => "linear-gate",
-            Self::RgLruLite => "rg-lru-lite",
         }
     }
 
@@ -179,8 +170,6 @@ impl BlackjackConfigProfile {
             Self::Plain => "blackjack_plain_config.toml",
             Self::NodeGru => "blackjack_node_gru_config.toml",
             Self::Hebbian => "blackjack_hebbian_config.toml",
-            Self::LinearGate => "blackjack_linear_gate_config.toml",
-            Self::RgLruLite => "blackjack_rg_lru_lite_config.toml",
         })
     }
 }
@@ -974,15 +963,12 @@ fn run_openes_mode(args: &[String]) -> Result<(), Box<dyn Error>> {
         .get(4)
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or(DEFAULT_BASE_SEED);
-    let output_dir = args
-        .get(5)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from("..")
-                .join("logs")
-                .join("ES")
-                .join(format!("blackjack_openes_seed{base_seed}"))
-        });
+    let output_dir = args.get(5).map(PathBuf::from).unwrap_or_else(|| {
+        PathBuf::from("..")
+            .join("logs")
+            .join("ES")
+            .join(format!("blackjack_openes_seed{base_seed}"))
+    });
     prepare_output_dir(&output_dir)?;
 
     let samples = (population_size / 2).max(1);
@@ -1009,7 +995,8 @@ fn run_openes_mode(args: &[String]) -> Result<(), Box<dyn Error>> {
         let scores = candidates
             .iter()
             .map(|candidate| {
-                let score = linear_train_fitness(&candidate.params, base_seed + generation as u64 * 997);
+                let score =
+                    linear_train_fitness(&candidate.params, base_seed + generation as u64 * 997);
                 if score > best_score {
                     best_score = score;
                     best_params = candidate.params.clone();
@@ -1078,15 +1065,12 @@ fn run_cma_mode(args: &[String]) -> Result<(), Box<dyn Error>> {
         .get(4)
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or(DEFAULT_BASE_SEED);
-    let output_dir = args
-        .get(5)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from("..")
-                .join("logs")
-                .join("ES")
-                .join(format!("blackjack_cma_seed{base_seed}"))
-        });
+    let output_dir = args.get(5).map(PathBuf::from).unwrap_or_else(|| {
+        PathBuf::from("..")
+            .join("logs")
+            .join("ES")
+            .join(format!("blackjack_cma_seed{base_seed}"))
+    });
     prepare_output_dir(&output_dir)?;
 
     let param_space = evo_optim_rust::ParamSpace {

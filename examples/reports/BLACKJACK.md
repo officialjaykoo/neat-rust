@@ -5,7 +5,7 @@
 For the current 100-generation, 3-seed sweep:
 
 ```text
-Hebbian > plain > node-GRU ~= linear-gate
+Hebbian > plain > node-GRU
 ```
 
 Hebbian is the only current memory profile that clearly improved the Blackjack
@@ -34,7 +34,6 @@ Result by average EV:
 Hebbian      avg EV -0.0046   best seed 703   EV -0.0014   win rate 43.3%
 plain        avg EV -0.0072   best seed 702   EV -0.0024   win rate 43.0%
 node-GRU     avg EV -0.0096   best seed 701   EV -0.0096   win rate 37.5%
-linear-gate  avg EV -0.0096   best seed 701   EV -0.0096   win rate 37.5%
 ```
 
 ## Read
@@ -57,7 +56,7 @@ node-GRU/cell-tree had one good seed but high variance
 ```
 
 Those records are useful as history, but the active comparison is now
-`plain / node-gru / hebbian / linear-gate`.
+`plain / node-gru / hebbian`.
 
 ## Run
 

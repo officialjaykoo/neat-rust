@@ -36,16 +36,6 @@ pub struct DefaultNodeGene {
     pub node_hebbian_mod_bias: f64,
     pub node_hebbian_mod_response: f64,
     pub node_hebbian_theta_decay: f64,
-    pub node_linear_decay_bias: f64,
-    pub node_linear_decay_response: f64,
-    pub node_linear_write_weight: f64,
-    pub node_linear_gate_bias: f64,
-    pub node_linear_gate_response: f64,
-    pub node_linear_min_decay: f64,
-    pub node_linear_input_mix: f64,
-    pub node_linear_memory_weight: f64,
-    pub node_linear_trace_decay: f64,
-    pub node_linear_trace_weight: f64,
 }
 
 impl DefaultNodeGene {
@@ -78,16 +68,6 @@ impl DefaultNodeGene {
             node_hebbian_mod_bias: 0.0,
             node_hebbian_mod_response: 1.0,
             node_hebbian_theta_decay: 0.95,
-            node_linear_decay_bias: 0.0,
-            node_linear_decay_response: 1.0,
-            node_linear_write_weight: 1.0,
-            node_linear_gate_bias: 0.0,
-            node_linear_gate_response: 1.0,
-            node_linear_min_decay: 0.5,
-            node_linear_input_mix: 0.0,
-            node_linear_memory_weight: 1.0,
-            node_linear_trace_decay: 0.8,
-            node_linear_trace_weight: 0.0,
         }
     }
 
@@ -141,26 +121,6 @@ impl DefaultNodeGene {
             FloatAttribute::init_value(&config.node_hebbian_mod_response, rng)?;
         self.node_hebbian_theta_decay =
             FloatAttribute::init_value(&config.node_hebbian_theta_decay, rng)?;
-        self.node_linear_decay_bias =
-            FloatAttribute::init_value(&config.node_linear_decay_bias, rng)?;
-        self.node_linear_decay_response =
-            FloatAttribute::init_value(&config.node_linear_decay_response, rng)?;
-        self.node_linear_write_weight =
-            FloatAttribute::init_value(&config.node_linear_write_weight, rng)?;
-        self.node_linear_gate_bias =
-            FloatAttribute::init_value(&config.node_linear_gate_bias, rng)?;
-        self.node_linear_gate_response =
-            FloatAttribute::init_value(&config.node_linear_gate_response, rng)?;
-        self.node_linear_min_decay =
-            FloatAttribute::init_value(&config.node_linear_min_decay, rng)?;
-        self.node_linear_input_mix =
-            FloatAttribute::init_value(&config.node_linear_input_mix, rng)?;
-        self.node_linear_memory_weight =
-            FloatAttribute::init_value(&config.node_linear_memory_weight, rng)?;
-        self.node_linear_trace_decay =
-            FloatAttribute::init_value(&config.node_linear_trace_decay, rng)?;
-        self.node_linear_trace_weight =
-            FloatAttribute::init_value(&config.node_linear_trace_weight, rng)?;
         Ok(())
     }
 
@@ -247,56 +207,6 @@ impl DefaultNodeGene {
             &config.node_hebbian_theta_decay,
             rng,
         )?;
-        self.node_linear_decay_bias = FloatAttribute::mutate_value(
-            self.node_linear_decay_bias,
-            &config.node_linear_decay_bias,
-            rng,
-        )?;
-        self.node_linear_decay_response = FloatAttribute::mutate_value(
-            self.node_linear_decay_response,
-            &config.node_linear_decay_response,
-            rng,
-        )?;
-        self.node_linear_write_weight = FloatAttribute::mutate_value(
-            self.node_linear_write_weight,
-            &config.node_linear_write_weight,
-            rng,
-        )?;
-        self.node_linear_gate_bias = FloatAttribute::mutate_value(
-            self.node_linear_gate_bias,
-            &config.node_linear_gate_bias,
-            rng,
-        )?;
-        self.node_linear_gate_response = FloatAttribute::mutate_value(
-            self.node_linear_gate_response,
-            &config.node_linear_gate_response,
-            rng,
-        )?;
-        self.node_linear_min_decay = FloatAttribute::mutate_value(
-            self.node_linear_min_decay,
-            &config.node_linear_min_decay,
-            rng,
-        )?;
-        self.node_linear_input_mix = FloatAttribute::mutate_value(
-            self.node_linear_input_mix,
-            &config.node_linear_input_mix,
-            rng,
-        )?;
-        self.node_linear_memory_weight = FloatAttribute::mutate_value(
-            self.node_linear_memory_weight,
-            &config.node_linear_memory_weight,
-            rng,
-        )?;
-        self.node_linear_trace_decay = FloatAttribute::mutate_value(
-            self.node_linear_trace_decay,
-            &config.node_linear_trace_decay,
-            rng,
-        )?;
-        self.node_linear_trace_weight = FloatAttribute::mutate_value(
-            self.node_linear_trace_weight,
-            &config.node_linear_trace_weight,
-            rng,
-        )?;
         Ok(())
     }
 
@@ -380,56 +290,6 @@ impl DefaultNodeGene {
                 other.node_hebbian_theta_decay,
                 rng,
             ),
-            node_linear_decay_bias: choose_copy(
-                self.node_linear_decay_bias,
-                other.node_linear_decay_bias,
-                rng,
-            ),
-            node_linear_decay_response: choose_copy(
-                self.node_linear_decay_response,
-                other.node_linear_decay_response,
-                rng,
-            ),
-            node_linear_write_weight: choose_copy(
-                self.node_linear_write_weight,
-                other.node_linear_write_weight,
-                rng,
-            ),
-            node_linear_gate_bias: choose_copy(
-                self.node_linear_gate_bias,
-                other.node_linear_gate_bias,
-                rng,
-            ),
-            node_linear_gate_response: choose_copy(
-                self.node_linear_gate_response,
-                other.node_linear_gate_response,
-                rng,
-            ),
-            node_linear_min_decay: choose_copy(
-                self.node_linear_min_decay,
-                other.node_linear_min_decay,
-                rng,
-            ),
-            node_linear_input_mix: choose_copy(
-                self.node_linear_input_mix,
-                other.node_linear_input_mix,
-                rng,
-            ),
-            node_linear_memory_weight: choose_copy(
-                self.node_linear_memory_weight,
-                other.node_linear_memory_weight,
-                rng,
-            ),
-            node_linear_trace_decay: choose_copy(
-                self.node_linear_trace_decay,
-                other.node_linear_trace_decay,
-                rng,
-            ),
-            node_linear_trace_weight: choose_copy(
-                self.node_linear_trace_weight,
-                other.node_linear_trace_weight,
-                rng,
-            ),
         })
     }
 
@@ -468,10 +328,6 @@ impl DefaultNodeGene {
             NodeMemoryKind::None => 0.0,
             NodeMemoryKind::NodeGru => self.node_gru_distance(other),
             NodeMemoryKind::Hebbian => self.node_hebbian_distance(other),
-            NodeMemoryKind::LinearGate => self.node_linear_gate_distance(other),
-            NodeMemoryKind::LinearGateV2 => {
-                self.node_linear_gate_distance(other) + self.node_linear_gate_v2_distance(other)
-            }
         }
     }
 
@@ -503,23 +359,5 @@ impl DefaultNodeGene {
         distance += (self.node_hebbian_mod_bias - other.node_hebbian_mod_bias).abs();
         distance += (self.node_hebbian_mod_response - other.node_hebbian_mod_response).abs();
         distance + (self.node_hebbian_theta_decay - other.node_hebbian_theta_decay).abs()
-    }
-
-    fn node_linear_gate_distance(&self, other: &Self) -> f64 {
-        let mut distance = 0.0;
-        distance += (self.node_linear_decay_bias - other.node_linear_decay_bias).abs();
-        distance += (self.node_linear_decay_response - other.node_linear_decay_response).abs();
-        distance += (self.node_linear_write_weight - other.node_linear_write_weight).abs();
-        distance += (self.node_linear_gate_bias - other.node_linear_gate_bias).abs();
-        distance + (self.node_linear_gate_response - other.node_linear_gate_response).abs()
-    }
-
-    fn node_linear_gate_v2_distance(&self, other: &Self) -> f64 {
-        let mut distance = 0.0;
-        distance += (self.node_linear_min_decay - other.node_linear_min_decay).abs();
-        distance += (self.node_linear_input_mix - other.node_linear_input_mix).abs();
-        distance += (self.node_linear_memory_weight - other.node_linear_memory_weight).abs();
-        distance += (self.node_linear_trace_decay - other.node_linear_trace_decay).abs();
-        distance + (self.node_linear_trace_weight - other.node_linear_trace_weight).abs()
     }
 }

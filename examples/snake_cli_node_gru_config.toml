@@ -1,4 +1,4 @@
-﻿[neat]
+[neat]
 fitness_criterion = "max"
 fitness_threshold = 420.0
 pop_size = 80
@@ -163,55 +163,6 @@ mutate_power = 0.15
 mutate_rate = 0.35
 replace_rate = 0.05
 
-[genome.node_linear_decay_bias]
-init_mean = 0.0
-init_stdev = 0.25
-init_type = "gaussian"
-max_value = 5.0
-min_value = -5.0
-mutate_power = 0.15
-mutate_rate = 0.35
-replace_rate = 0.05
-
-[genome.node_linear_decay_response]
-init_mean = 1.0
-init_stdev = 0.20
-init_type = "gaussian"
-max_value = 5.0
-min_value = -5.0
-mutate_power = 0.12
-mutate_rate = 0.25
-replace_rate = 0.05
-
-[genome.node_linear_write_weight]
-init_mean = 1.0
-init_stdev = 0.35
-init_type = "gaussian"
-max_value = 5.0
-min_value = -5.0
-mutate_power = 0.15
-mutate_rate = 0.35
-replace_rate = 0.05
-
-[genome.node_linear_gate_bias]
-init_mean = 0.0
-init_stdev = 0.25
-init_type = "gaussian"
-max_value = 5.0
-min_value = -5.0
-mutate_power = 0.15
-mutate_rate = 0.35
-replace_rate = 0.05
-
-[genome.node_linear_gate_response]
-init_mean = 1.0
-init_stdev = 0.20
-init_type = "gaussian"
-max_value = 5.0
-min_value = -5.0
-mutate_power = 0.12
-mutate_rate = 0.25
-replace_rate = 0.05
 [genome.enabled]
 default = true
 mutate_rate = 0.012

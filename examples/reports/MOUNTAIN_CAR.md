@@ -5,7 +5,7 @@
 For the current 100-generation, 3-seed sweep:
 
 ```text
-node-GRU > plain > linear-gate > Hebbian
+node-GRU > plain > Hebbian
 ```
 
 The margin between node-GRU and plain is small. MountainCar confirms that
@@ -33,7 +33,6 @@ Result by average report fitness:
 ```text
 node-GRU     avg 1246.61   best seed 703   1248.05   avg steps 102
 plain        avg 1223.47   best seed 702   1248.61   avg steps 102
-linear-gate  avg 1218.99   best seed 702   1243.64   avg steps 105
 Hebbian      avg 1178.90   best seed 702   1187.05   avg steps 133
 ```
 

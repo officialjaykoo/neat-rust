@@ -80,10 +80,6 @@ fn initializes_node_gene_from_config() {
         gene.node_hebbian_decay >= config.node_hebbian_decay.min_value
             && gene.node_hebbian_decay <= config.node_hebbian_decay.max_value
     );
-    assert!(
-        gene.node_linear_gate_response >= config.node_linear_gate_response.min_value
-            && gene.node_linear_gate_response <= config.node_linear_gate_response.max_value
-    );
 }
 
 #[test]
@@ -114,7 +110,6 @@ fn node_gene_crossover_inherits_each_attribute_independently() {
         iz_d: 8.0,
         node_memory_kind: NodeMemoryKind::NodeGru,
         node_hebbian_eta: 3.0,
-        node_linear_gate_response: 4.0,
         ..DefaultNodeGene::new(1)
     };
     let right = DefaultNodeGene {
@@ -130,7 +125,6 @@ fn node_gene_crossover_inherits_each_attribute_independently() {
         iz_d: 4.0,
         node_memory_kind: NodeMemoryKind::Hebbian,
         node_hebbian_eta: -3.0,
-        node_linear_gate_response: -4.0,
         ..DefaultNodeGene::new(1)
     };
     let mut rng = SequenceRng::new(&[
@@ -153,7 +147,6 @@ fn node_gene_crossover_inherits_each_attribute_independently() {
     assert_eq!(child.iz_d, 8.0);
     assert_eq!(child.node_memory_kind, NodeMemoryKind::NodeGru);
     assert_eq!(child.node_hebbian_eta, 3.0);
-    assert_eq!(child.node_linear_gate_response, 4.0);
 }
 
 #[test]

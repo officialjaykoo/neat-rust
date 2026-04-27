@@ -27,8 +27,8 @@ pub use crate::io::{
 };
 pub use crate::network::{
     DecodedNetwork, FeedForwardNetwork, GenomeCodec, NetworkCodec, NetworkCodecError, NetworkKind,
-    NodeGruMemory, NodeHebbianMemory, NodeLinearGateMemory, NodeLinearGateV2Memory,
-    RecurrentConnectionEval, RecurrentNetwork, RecurrentNodeMemory,
+    NodeGruMemory, NodeHebbianMemory, RecurrentConnectionEval, RecurrentNetwork,
+    RecurrentNodeMemory,
 };
 #[cfg(feature = "policy-bridge")]
 pub use crate::runtime::{

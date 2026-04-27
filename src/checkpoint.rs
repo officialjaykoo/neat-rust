@@ -436,27 +436,6 @@ enum NodeMemoryDocument {
         mod_response: f64,
         theta_decay: f64,
     },
-    #[serde(rename = "linear-gate")]
-    LinearGate {
-        decay_bias: f64,
-        decay_response: f64,
-        write_weight: f64,
-        gate_bias: f64,
-        gate_response: f64,
-    },
-    #[serde(rename = "rg-lru-lite")]
-    RgLruLite {
-        decay_bias: f64,
-        decay_response: f64,
-        write_weight: f64,
-        gate_bias: f64,
-        gate_response: f64,
-        min_decay: f64,
-        input_mix: f64,
-        memory_weight: f64,
-        trace_decay: f64,
-        trace_weight: f64,
-    },
 }
 
 impl NodeGeneDocument {
@@ -519,25 +498,6 @@ impl NodeMemoryDocument {
                 mod_response: gene.node_hebbian_mod_response,
                 theta_decay: gene.node_hebbian_theta_decay,
             },
-            NodeMemoryKind::LinearGate => Self::LinearGate {
-                decay_bias: gene.node_linear_decay_bias,
-                decay_response: gene.node_linear_decay_response,
-                write_weight: gene.node_linear_write_weight,
-                gate_bias: gene.node_linear_gate_bias,
-                gate_response: gene.node_linear_gate_response,
-            },
-            NodeMemoryKind::LinearGateV2 => Self::RgLruLite {
-                decay_bias: gene.node_linear_decay_bias,
-                decay_response: gene.node_linear_decay_response,
-                write_weight: gene.node_linear_write_weight,
-                gate_bias: gene.node_linear_gate_bias,
-                gate_response: gene.node_linear_gate_response,
-                min_decay: gene.node_linear_min_decay,
-                input_mix: gene.node_linear_input_mix,
-                memory_weight: gene.node_linear_memory_weight,
-                trace_decay: gene.node_linear_trace_decay,
-                trace_weight: gene.node_linear_trace_weight,
-            },
         }
     }
 
@@ -585,44 +545,6 @@ impl NodeMemoryDocument {
                 gene.node_hebbian_mod_bias = mod_bias;
                 gene.node_hebbian_mod_response = mod_response;
                 gene.node_hebbian_theta_decay = theta_decay;
-            }
-            Self::LinearGate {
-                decay_bias,
-                decay_response,
-                write_weight,
-                gate_bias,
-                gate_response,
-            } => {
-                gene.node_memory_kind = NodeMemoryKind::LinearGate;
-                gene.node_linear_decay_bias = decay_bias;
-                gene.node_linear_decay_response = decay_response;
-                gene.node_linear_write_weight = write_weight;
-                gene.node_linear_gate_bias = gate_bias;
-                gene.node_linear_gate_response = gate_response;
-            }
-            Self::RgLruLite {
-                decay_bias,
-                decay_response,
-                write_weight,
-                gate_bias,
-                gate_response,
-                min_decay,
-                input_mix,
-                memory_weight,
-                trace_decay,
-                trace_weight,
-            } => {
-                gene.node_memory_kind = NodeMemoryKind::LinearGateV2;
-                gene.node_linear_decay_bias = decay_bias;
-                gene.node_linear_decay_response = decay_response;
-                gene.node_linear_write_weight = write_weight;
-                gene.node_linear_gate_bias = gate_bias;
-                gene.node_linear_gate_response = gate_response;
-                gene.node_linear_min_decay = min_decay;
-                gene.node_linear_input_mix = input_mix;
-                gene.node_linear_memory_weight = memory_weight;
-                gene.node_linear_trace_decay = trace_decay;
-                gene.node_linear_trace_weight = trace_weight;
             }
         }
         Ok(())
